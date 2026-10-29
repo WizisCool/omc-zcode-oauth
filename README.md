@@ -37,15 +37,17 @@ plugins:
   store-sources:
     - https://raw.githubusercontent.com/WizisCool/omc-zcode-oauth/refs/heads/main/registry.json
   configs:
-    zcode:
+    omc-zcode-oauth:
       enabled: true
       site: zai
       mode: own
 ```
 
-Then install `zcode` from CPA's plugin store. Releases are created by GitHub
-Actions whenever a `v*` tag is pushed. See [docs/USAGE.md](docs/USAGE.md) for
-configuration, login, quota and troubleshooting.
+Then install `omc-zcode-oauth` from CPA's plugin store. Releases are created
+by GitHub Actions whenever a `v*` tag is pushed. See [docs/USAGE.md](docs/USAGE.md) for
+configuration, login, quota and troubleshooting. The store and shared-library
+name is `omc-zcode-oauth`; the CPA credential provider identifier remains
+`zcode`.
 
 ## Configuration
 
@@ -73,14 +75,15 @@ GOPROXY=off GOSUMDB=off go vet ./...
 CI builds these release artifacts from a tag:
 
 ```text
-zcode_<version>_linux_amd64.zip
-zcode_<version>_linux_arm64.zip
-zcode_<version>_darwin_arm64.zip
+omc-zcode-oauth_<version>_linux_amd64.zip
+omc-zcode-oauth_<version>_linux_arm64.zip
+omc-zcode-oauth_<version>_darwin_arm64.zip
 checksums.txt
 ```
 
-Each archive contains the correctly named `zcode.so` or `zcode.dylib`. Local
-native builds use `make build`; `make package` creates the same archive format.
+Each archive contains the correctly named `omc-zcode-oauth.so` or
+`omc-zcode-oauth.dylib`. Local native builds use `make build`; `make package`
+creates the same archive format.
 
 ## Project layout
 

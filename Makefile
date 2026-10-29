@@ -1,4 +1,4 @@
-PLUGIN_ID ?= zcode
+PLUGIN_ID ?= omc-zcode-oauth
 VERSION ?= 0.0.0-dev
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)

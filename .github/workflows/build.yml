@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 env:
-  PLUGIN_ID: zcode
+  PLUGIN_ID: omc-zcode-oauth
 
 jobs:
   test:

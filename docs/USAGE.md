@@ -14,7 +14,7 @@ plugins:
   store-sources:
     - https://raw.githubusercontent.com/WizisCool/omc-zcode-oauth/refs/heads/main/registry.json
   configs:
-    zcode:
+    omc-zcode-oauth:
       enabled: true
       site: zai
       mode: own
@@ -24,22 +24,24 @@ plugins:
       team_language: en
 ```
 
-Use CPA's plugin store to install `zcode`, or call:
+Use CPA's plugin store to install `omc-zcode-oauth`, or call:
 
 ```text
-POST /v0/management/plugin-store/zcode/install
+POST /v0/management/plugin-store/omc-zcode-oauth/install
 ```
 
 A specific tagged release can be selected with `?version=0.1.0`. The release
-archive is installed under `<plugins-dir>/<os>/<arch>/zcode.so`; macOS uses
-`zcode.dylib`. Restart CPA if it reports that the loaded plugin must be replaced.
+archive is installed under
+`<plugins-dir>/<os>/<arch>/omc-zcode-oauth.so`; macOS uses
+`omc-zcode-oauth.dylib`. Restart CPA if it reports that the loaded plugin must
+be replaced.
 
 Manual layout:
 
 ```text
-<plugins-dir>/linux/amd64/zcode.so
-<plugins-dir>/linux/arm64/zcode.so
-<plugins-dir>/darwin/arm64/zcode.dylib
+<plugins-dir>/linux/amd64/omc-zcode-oauth.so
+<plugins-dir>/linux/arm64/omc-zcode-oauth.so
+<plugins-dir>/darwin/arm64/omc-zcode-oauth.dylib
 ```
 
 ## Build locally
@@ -124,7 +126,8 @@ contain the business token those endpoints require.
 ## Troubleshooting
 
 - **The provider is absent:** enable the global `plugins` switch and
-  `plugins.configs.zcode.enabled`, then restart CPA if the library was replaced.
+  `plugins.configs.omc-zcode-oauth.enabled`, then restart CPA if the library was
+  replaced.
 - **No models appear:** inspect model discovery errors in CPA logs and confirm
   the credential status is active.
 - **Login stays pending:** complete the browser flow for the selected site.

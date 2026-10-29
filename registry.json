@@ -2,7 +2,7 @@
   "schema_version": 2,
   "plugins": [
     {
-      "id": "zcode",
+      "id": "omc-zcode-oauth",
       "name": "OMC ZCode OAuth",
       "description": "Native ZCode provider for CLIProxyAPI with OAuth, model discovery, Anthropic Messages execution, Coding Plan and gift routes, and normalized quota.",
       "author": "JUNZE",
