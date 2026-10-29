@@ -1,0 +1,16 @@
+build/
+dist/
+*.so
+*.dylib
+*.dll
+*.h
+auths/
+.env
+.env.*
+*.env
+*.token
+*.jwt
+token*.json
+credentials*.json
+secrets/
+.zcode-oauth-state.key

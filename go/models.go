@@ -1,0 +1,283 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"regexp"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
+)
+
+type catalog struct {
+	Config struct {
+		ProviderConfigRules struct {
+			ProviderRules []struct {
+				ProviderID      string   `json:"providerId"`
+				BuiltinModelIDs []string `json:"builtinModelIds"`
+			} `json:"providerRules"`
+		} `json:"providerConfigRules"`
+		ModelConfigRules struct {
+			BuiltinProviderModelRules []struct {
+				ProviderID string `json:"providerId"`
+				ModelID    string `json:"modelId"`
+				Config     struct {
+					Enabled *bool `json:"enabled"`
+				} `json:"config"`
+			} `json:"builtinProviderModelRules"`
+			ModelRules []struct {
+				Match  string `json:"modelMatch"`
+				Config struct {
+					Properties struct {
+						Context     int64 `json:"contextWindow"`
+						InputFormat struct {
+							SupportsImage bool `json:"supportsImage"`
+						} `json:"inputFormat"`
+					} `json:"properties"`
+					OptionSpecs struct {
+						MaxOutputTokens struct {
+							Max int64 `json:"max"`
+						} `json:"maxOutputTokens"`
+						ReasoningLevel struct {
+							Values []string `json:"values"`
+						} `json:"reasoningLevel"`
+					} `json:"optionSpecs"`
+				} `json:"config"`
+			} `json:"modelRules"`
+		} `json:"modelConfigRules"`
+	} `json:"config"`
+}
+
+var catalogCache struct {
+	sync.Mutex
+	at         time.Time
+	appVersion string
+	value      *catalog
+}
+
+func zcodePlatform() string {
+	osname := runtime.GOOS
+	if osname == "windows" {
+		osname = "win32"
+	}
+	arch := runtime.GOARCH
+	if arch == "amd64" {
+		arch = "x64"
+	}
+	return osname + "-" + arch
+}
+func fetchCatalog(sender httpSender) *catalog {
+	cfg := getConfig()
+	catalogCache.Lock()
+	defer catalogCache.Unlock()
+	if catalogCache.appVersion == cfg.AppVersion && time.Since(catalogCache.at) < 10*time.Minute {
+		return catalogCache.value
+	}
+	catalogCache.at = time.Now()
+	catalogCache.appVersion = cfg.AppVersion
+	catalogCache.value = nil
+	target := zcodeRoot + "/api/v1/client/configs?" + url.Values{"app_version": {cfg.AppVersion}, "platform": {zcodePlatform()}}.Encode()
+	device, err := randomUUID()
+	if err != nil {
+		return nil
+	}
+	raw, err := apiCall(sender, "GET", target, "", device, nil, nil)
+	if err != nil {
+		return nil
+	}
+	var metadata struct {
+		Configs struct {
+			Builtin string `json:"builtin_provider_config_json"`
+		} `json:"configs"`
+	}
+	if json.Unmarshal(raw, &metadata) != nil {
+		return nil
+	}
+	parsed, err := url.Parse(metadata.Configs.Builtin)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+		return nil
+	}
+	resp, err := sender.Do(pluginapi.HTTPRequest{Method: "GET", URL: parsed.String(), Headers: map[string][]string{"User-Agent": {"ZCode/" + cfg.AppVersion}}})
+	if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil
+	}
+	var doc catalog
+	if json.Unmarshal(resp.Body, &doc) != nil {
+		return nil
+	}
+	catalogCache.value = &doc
+	return &doc
+}
+func fallbackModels() []pluginapi.ModelInfo {
+	return []pluginapi.ModelInfo{
+		modelInfo("GLM-5.3", 1000000, 128000, []string{"low", "high", "max"}),
+		modelInfo("GLM-5.3-Flash", 1000000, 128000, []string{"low", "high", "max"}),
+		modelInfo("GLM-5.2", 1000000, 128000, []string{"none", "high", "max"}),
+		modelInfo("GLM-5-Turbo", 200000, 64000, []string{"none", "high"}),
+	}
+}
+func modelInfo(id string, context, output int64, levels []string) pluginapi.ModelInfo {
+	return pluginapi.ModelInfo{ID: id, Name: id, DisplayName: id, Object: "model", OwnedBy: "zcode", Type: "zcode", ContextLength: context, InputTokenLimit: context, MaxCompletionTokens: output, OutputTokenLimit: output, Thinking: &pluginapi.ThinkingSupport{Levels: levels}}
+}
+func catalogModels(doc *catalog, c credential) []pluginapi.ModelInfo {
+	if doc == nil {
+		return fallbackModels()
+	}
+	plan := "account:zai-individual-coding-plan"
+	if c.Site == "bigmodel" {
+		plan = "account:bigmodel-individual-coding-plan"
+	}
+	if c.Key == "" {
+		plan = "account:zai-start-plan"
+	}
+	ids := []string{}
+	seen := map[string]bool{}
+	disabled := map[string]bool{}
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		k := strings.ToLower(id)
+		if id != "" && !seen[k] {
+			seen[k] = true
+			ids = append(ids, id)
+		}
+	}
+	for _, r := range doc.Config.ProviderConfigRules.ProviderRules {
+		if r.ProviderID == plan {
+			for _, id := range r.BuiltinModelIDs {
+				add(id)
+			}
+		}
+	}
+	for _, r := range doc.Config.ModelConfigRules.BuiltinProviderModelRules {
+		if r.ProviderID != plan {
+			continue
+		}
+		if r.Config.Enabled != nil && !*r.Config.Enabled {
+			disabled[strings.ToLower(r.ModelID)] = true
+		} else {
+			add(r.ModelID)
+		}
+	}
+	var out []pluginapi.ModelInfo
+	fallbacks := fallbackModels()
+	for _, id := range ids {
+		if disabled[strings.ToLower(id)] {
+			continue
+		}
+		m := modelInfo(id, 0, 0, nil)
+		for _, f := range fallbacks {
+			if strings.EqualFold(f.ID, id) {
+				m = f
+				m.ID = id
+				m.Name = id
+				m.DisplayName = id
+				break
+			}
+		}
+		for _, rule := range doc.Config.ModelConfigRules.ModelRules {
+			re, e := regexp.Compile("(?i)^(?:" + rule.Match + ")$")
+			if e != nil || !re.MatchString(id) {
+				continue
+			}
+			c := rule.Config
+			if c.Properties.Context > 0 {
+				m.ContextLength = c.Properties.Context
+				m.InputTokenLimit = c.Properties.Context
+			}
+			if c.OptionSpecs.MaxOutputTokens.Max > 0 {
+				m.MaxCompletionTokens = c.OptionSpecs.MaxOutputTokens.Max
+				m.OutputTokenLimit = c.OptionSpecs.MaxOutputTokens.Max
+			}
+			if len(c.OptionSpecs.ReasoningLevel.Values) > 0 {
+				var levels []string
+				for _, v := range c.OptionSpecs.ReasoningLevel.Values {
+					switch v {
+					case "disabled":
+						v = "none"
+					case "enabled":
+						v = "high"
+					}
+					found := false
+					for _, x := range levels {
+						if x == v {
+							found = true
+						}
+					}
+					if !found {
+						levels = append(levels, v)
+					}
+				}
+				m.Thinking = &pluginapi.ThinkingSupport{Levels: levels}
+			}
+		}
+		out = append(out, m)
+	}
+	if len(out) == 0 {
+		return fallbacks
+	}
+	return out
+}
+func modelsForAuth(req pluginapi.AuthModelRequest, sender httpSender) (pluginapi.ModelResponse, error) {
+	c, err := readCredential(req.StorageJSON)
+	if err != nil {
+		return pluginapi.ModelResponse{}, err
+	}
+	models := catalogModels(fetchCatalog(sender), c)
+	balance, err := fetchBalance(sender, c)
+	if err == nil {
+		existing := map[string]pluginapi.ModelInfo{}
+		for _, m := range models {
+			existing[strings.ToLower(m.ID)] = m
+		}
+		seen := map[string]bool{}
+		now := balance.now()
+		for _, b := range balance.Balances {
+			if !bucketUsable(b, now) {
+				continue
+			}
+			active := false
+			for _, p := range balance.Plans {
+				if samePlan(p, b) && livePlan(p, now) {
+					active = true
+					break
+				}
+			}
+			if !active {
+				continue
+			}
+			for _, name := range bucketModels(b) {
+				key := strings.ToLower(name)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				m, ok := existing[key]
+				if !ok {
+					m = modelInfo(name, 0, 0, nil)
+				}
+				m.ID += "-Trial"
+				m.Name = m.ID
+				m.DisplayName = m.ID
+				models = append(models, m)
+				if c.Key == "" && !ok {
+					normal := m
+					normal.ID = name
+					normal.Name = name
+					normal.DisplayName = name
+					models = append(models, normal)
+				}
+			}
+		}
+	}
+	return pluginapi.ModelResponse{Provider: "zcode", Models: models}, nil
+}
+func requireTrial(balance balanceData, model string) error {
+	if !giftHasModel(balance, model) {
+		return fmt.Errorf("no usable gift bucket for model %s", model)
+	}
+	return nil
+}

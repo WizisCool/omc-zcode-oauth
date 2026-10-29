@@ -1,0 +1,18 @@
+{
+  "schema_version": 2,
+  "plugins": [
+    {
+      "id": "zcode",
+      "name": "OMC ZCode OAuth",
+      "description": "Native ZCode provider for CLIProxyAPI with OAuth, model discovery, Anthropic Messages execution, Coding Plan and gift routes, and normalized quota.",
+      "author": "JUNZE",
+      "repository": "https://github.com/WizisCool/omc-zcode-oauth",
+      "logo": "https://raw.githubusercontent.com/WizisCool/omc-zcode-oauth/refs/heads/main/assets/logo.svg",
+      "homepage": "https://github.com/WizisCool/omc-zcode-oauth",
+      "license": "MIT",
+      "tags": ["Provider", "OAuth", "Quota", "GLM", "ZCode"],
+      "auth_required": true,
+      "install": {"type": "github-release"}
+    }
+  ]
+}
