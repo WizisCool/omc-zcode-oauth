@@ -16,9 +16,7 @@ plugins:
   configs:
     omc-zcode-oauth:
       enabled: true
-      site: zai
       mode: own
-      prefer_gift: false
       max_concurrency: 3
       app_version: 3.16.3
       team_language: en
@@ -30,7 +28,7 @@ Use CPA's plugin store to install `omc-zcode-oauth`, or call:
 POST /v0/management/plugin-store/omc-zcode-oauth/install
 ```
 
-A specific tagged release can be selected with `?version=0.1.0`. The release
+A specific tagged release can be selected with `?version=0.1.1`. The release
 archive is installed under
 `<plugins-dir>/<os>/<arch>/omc-zcode-oauth.so`; macOS uses
 `omc-zcode-oauth.dylib`. Restart CPA if it reports that the loaded plugin must
@@ -52,8 +50,8 @@ go mod download
 GOPROXY=off GOSUMDB=off go test ./...
 GOPROXY=off GOSUMDB=off go vet ./...
 cd ..
-make build VERSION=0.1.0
-make package VERSION=0.1.0
+make build VERSION=0.1.1
+make package VERSION=0.1.1
 ```
 
 `make build` uses the current machine's OS and architecture. Official release
@@ -62,7 +60,11 @@ artifacts for Linux amd64, Linux arm64 and Darwin arm64 are built by the
 
 ## Sign in
 
-Open CPA's Providers page and choose a ZCode sign-in, or call:
+Open CPA's Providers page and choose the ZCode sign-in tile. The plugin opens a
+site chooser with separate Z.AI and BigModel.cn entries, each using that site's
+logo. Choose the site where the subscription or gift plan belongs.
+
+For direct or automated login, the same endpoints can skip the chooser:
 
 ```text
 GET /v0/management/zcode-auth-url?site=zai
@@ -81,14 +83,14 @@ renewed, so start a new sign-in when they expire.
 
 ## Models and routing
 
-Use the ordinary model name for a Coding Plan. A model ending in `-Trial`
-selects a currently usable matching gift bucket and never falls back to paid
-traffic. A gift-only credential routes ordinary model names to the ZCode gift
-service.
+Model names are the vendor model IDs returned by ZCode's catalogue. The plugin
+does not create `-Trial` aliases.
 
-`prefer_gift` is an operator preference for choosing `-Trial` model names; it
-does not silently reroute a named paid model. Expired, exhausted and
-future-starting gift buckets are not advertised as usable.
+A credential with a Coding Plan key uses the paid Anthropic endpoint. A
+gift-only credential, identified by an empty Coding Plan key, routes ordinary
+model names to the ZCode gift service after verifying an active, usable gift
+bucket for that model. Expired, exhausted and future-starting buckets do not
+pass that check, and a gift request never falls back to paid traffic.
 
 ## Quota
 
@@ -130,10 +132,12 @@ contain the business token those endpoints require.
   replaced.
 - **No models appear:** inspect model discovery errors in CPA logs and confirm
   the credential status is active.
+- **The site chooser does not open:** verify that the plugin version is `0.1.1`
+  or newer and that CPA can reach its own `/v0/resource/plugins/` routes.
 - **Login stays pending:** complete the browser flow for the selected site.
-  International and China accounts are separate; use `site=zai` or
-  `site=bigmodel` to match the account.
-- **A trial model is absent:** the gift plan may not have started, may have
-  ended, or may have no remaining units.
+  International and China accounts are separate; choose `Z.AI` or
+  `BigModel.cn` to match the account.
+- **A model is absent:** the vendor catalogue may not expose it, or a gift-only
+  credential may have no active bucket containing that model.
 - **A 3012 marker blocks calls:** check the account in ZCode. Only remove the
   marker after the vendor clears the account.

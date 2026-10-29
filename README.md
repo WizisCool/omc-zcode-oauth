@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" width="96" height="96" alt="OMC ZCode OAuth logo">
+  <img src="assets/logo.png" width="96" height="96" alt="OMC ZCode OAuth logo">
 </p>
 
 <h1 align="center">OMC ZCode OAuth</h1>
@@ -16,10 +16,10 @@ process or local ZCode client.
 
 ## Features
 
-- Z.ai and BigModel OAuth.
+- Z.ai and BigModel OAuth through an in-app two-site chooser.
 - Personal Coding Plan, team-seat and gift-only credentials.
 - Model discovery from ZCode's client catalogue.
-- Explicit `<Model>-Trial` gift routes and `GLM-5.3-Flash-Trial` style entries.
+- Gift-only credentials route ordinary vendor model names through the gift service.
 - Streaming and non-streaming Anthropic Messages requests.
 - Normalized subscription, 5-hour, weekly, MCP and gift-bucket quota.
 - Per-credential concurrency control.
@@ -39,23 +39,21 @@ plugins:
   configs:
     omc-zcode-oauth:
       enabled: true
-      site: zai
       mode: own
 ```
 
-Then install `omc-zcode-oauth` from CPA's plugin store. Releases are created
-by GitHub Actions whenever a `v*` tag is pushed. See [docs/USAGE.md](docs/USAGE.md) for
-configuration, login, quota and troubleshooting. The store and shared-library
-name is `omc-zcode-oauth`; the CPA credential provider identifier remains
-`zcode`.
+Then install `omc-zcode-oauth` from CPA's plugin store. Its OAuth tile opens a
+two-entry chooser for Z.AI and BigModel.cn before redirecting to the selected
+site. Releases are created by GitHub Actions whenever a `v*` tag is pushed. See
+[docs/USAGE.md](docs/USAGE.md) for configuration, login, quota and
+troubleshooting. The store and shared-library name is `omc-zcode-oauth`; the CPA
+credential provider identifier remains `zcode`.
 
 ## Configuration
 
 | Field | Type | Default | Values |
 | --- | --- | --- | --- |
-| `site` | enum | `zai` | `zai`, `bigmodel` |
 | `mode` | enum | `own` | `own`, `team` |
-| `prefer_gift` | boolean | `false` | Operator model-choice preference |
 | `max_concurrency` | integer | `3` | 1–100 requests per credential |
 | `app_version` | string | `3.16.3` | ZCode client version |
 | `team_language` | enum | `en` | `zh`, `en` |
@@ -90,7 +88,8 @@ creates the same archive format.
 ```text
 .github/workflows/   CI tests, native builds and tagged releases
 .github/scripts/     Release archive packager
-assets/logo.svg      Plugin-store and management logo
+assets/logo.png      Z.AI and plugin-store logo
+assets/bigmodel.png  BigModel.cn sign-in logo
 go/                  Go/cgo plugin implementation and tests
 docs/USAGE.md        Operator installation and usage guide
 registry.json        CLIProxyAPI plugin-store metadata

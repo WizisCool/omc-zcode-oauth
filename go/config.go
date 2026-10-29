@@ -9,9 +9,7 @@ import (
 )
 
 type config struct {
-	Site           string `yaml:"site"`
 	Mode           string `yaml:"mode"`
-	PreferGift     bool   `yaml:"prefer_gift"`
 	MaxConcurrency int    `yaml:"max_concurrency"`
 	AppVersion     string `yaml:"app_version"`
 	TeamLanguage   string `yaml:"team_language"`
@@ -21,7 +19,7 @@ var configMu sync.RWMutex
 var currentConfig = defaults()
 
 func defaults() config {
-	return config{Site: "zai", Mode: "own", MaxConcurrency: 3, AppVersion: "3.16.3", TeamLanguage: "en"}
+	return config{Mode: "own", MaxConcurrency: 3, AppVersion: "3.16.3", TeamLanguage: "en"}
 }
 func getConfig() config { configMu.RLock(); defer configMu.RUnlock(); return currentConfig }
 func configure(raw []byte) error {
@@ -31,7 +29,7 @@ func configure(raw []byte) error {
 			return fmt.Errorf("invalid plugin configuration")
 		}
 	}
-	if (c.Site != "zai" && c.Site != "bigmodel") || (c.Mode != "own" && c.Mode != "team") || (c.TeamLanguage != "zh" && c.TeamLanguage != "en") || c.MaxConcurrency < 1 || c.MaxConcurrency > 100 || strings.TrimSpace(c.AppVersion) == "" {
+	if (c.Mode != "own" && c.Mode != "team") || (c.TeamLanguage != "zh" && c.TeamLanguage != "en") || c.MaxConcurrency < 1 || c.MaxConcurrency > 100 || strings.TrimSpace(c.AppVersion) == "" {
 		return fmt.Errorf("invalid zcode plugin configuration")
 	}
 	configMu.Lock()

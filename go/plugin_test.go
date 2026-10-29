@@ -137,6 +137,72 @@ func TestStartAndPollOAuth(t *testing.T) {
 		t.Fatalf("poll status %q err %v", poll.Status, err)
 	}
 }
+func TestOAuthSiteChooserStartsSelectedSite(t *testing.T) {
+	now := time.Now().Unix()
+	var initCalls int
+	var initProvider, initBearer, initDevice string
+	sender := &fakeSender{reply: func(r pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+		switch {
+		case strings.HasSuffix(r.URL, "/oauth/cli/init"):
+			initCalls++
+			initBearer = r.Headers.Get("Authorization")
+			initDevice = r.Headers.Get("X-Device-Mid")
+			var body map[string]string
+			if err := json.Unmarshal(r.Body, &body); err != nil {
+				t.Fatal(err)
+			}
+			initProvider = body["provider"]
+			return jsonReply(fmt.Sprintf(`{"flow_id":"0123456789abcdef0123456789abcdef","authorize_url":"https://bigmodel.cn/login?state=old","poll_interval_sec":2,"expires_at":%d}`, now+300)), nil
+		case strings.Contains(r.URL, "/oauth/cli/poll/"):
+			if r.Headers.Get("Authorization") != initBearer || r.Headers.Get("X-Device-Mid") != initDevice {
+				t.Error("poll identity changed")
+			}
+			return jsonReply(`{"status":"pending"}`), nil
+		default:
+			t.Fatalf("unexpected URL %s", r.URL)
+			return pluginapi.HTTPResponse{}, nil
+		}
+	}}
+	dir := t.TempDir()
+	start, err := startLogin(pluginapi.AuthLoginStartRequest{BaseURL: "http://127.0.0.1:8317/v0/management/oauth-callback", Host: pluginapi.HostConfigSummary{AuthDir: dir}}, sender)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initCalls != 0 {
+		t.Fatal("site chooser contacted the vendor before a site was selected")
+	}
+	u, err := url.Parse(start.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Host != "127.0.0.1:8317" || u.Path != "/v0/resource/plugins/omc-zcode-oauth/oauth-select" || u.Query().Get("state") != start.State {
+		t.Fatalf("wrong chooser URL %s", start.URL)
+	}
+	page, err := handleOAuthResource(pluginapi.ManagementRequest{Method: http.MethodGet, Path: u.Path, Query: u.Query()}, "")
+	if err != nil || page.StatusCode != http.StatusOK || !bytes.Contains(page.Body, []byte("Z.AI")) || !bytes.Contains(page.Body, []byte("BigModel.cn")) {
+		t.Fatalf("bad chooser page status=%d err=%v", page.StatusCode, err)
+	}
+	logo, err := handleOAuthResource(pluginapi.ManagementRequest{Method: http.MethodGet, Path: "/v0/resource/plugins/omc-zcode-oauth/bigmodel.png"}, "")
+	if err != nil || logo.StatusCode != http.StatusOK || logo.Headers.Get("Content-Type") != "image/png" || !bytes.Equal(logo.Body, bigModelLogoPNG) {
+		t.Fatal("BigModel logo resource unavailable")
+	}
+	redirect, err := handleOAuthResourceWithSender(pluginapi.ManagementRequest{Method: http.MethodGet, Path: "/v0/resource/plugins/omc-zcode-oauth/oauth-start", Query: url.Values{"state": {start.State}, "site": {"bigmodel"}}}, "", sender)
+	if err != nil || redirect.StatusCode != http.StatusFound {
+		t.Fatalf("start selected site status=%d err=%v body=%s", redirect.StatusCode, err, redirect.Body)
+	}
+	loginURL, err := url.Parse(redirect.Headers.Get("Location"))
+	if err != nil || loginURL.Host != "bigmodel.cn" {
+		t.Fatalf("wrong selected login URL")
+	}
+	if initCalls != 1 || initProvider != "bigmodel" {
+		t.Fatalf("init calls=%d provider=%q", initCalls, initProvider)
+	}
+	poll, err := pollLogin(pluginapi.AuthLoginPollRequest{Host: pluginapi.HostConfigSummary{AuthDir: dir}, State: start.State}, sender)
+	if err != nil || poll.Status != pluginapi.AuthLoginStatusPending {
+		t.Fatalf("poll status=%q err=%v", poll.Status, err)
+	}
+}
+
 func TestPollStatusClassification(t *testing.T) {
 	dir := t.TempDir()
 	key, _ := loadStateKey(dir)
@@ -194,9 +260,9 @@ func TestGiftRequestWrapperAndPaidRoute(t *testing.T) {
 		t.Fatalf("unexpected upstream call")
 		return pluginapi.HTTPResponse{}, nil
 	}}
-	c := credential{Site: "bigmodel", Key: "paid.fake", JWT: "session.fake", Device: "00000000-0000-4000-8000-000000000001", UID: "uid"}
-	payload := []byte(`{"model":"GLM-5.3-Flash-Trial","system":[{"type":"text","text":"agent rules"}],"messages":[{"role":"user","content":[{"type":"text","text":"hello","cache_control":{"type":"ephemeral"}},{"type":"text","text":"last"}]}],"tools":[{"name":"Bash","cache_control":{"type":"ephemeral"}}],"max_tokens":100}`)
-	req := pluginapi.ExecutorRequest{AuthID: "fixture", Model: "GLM-5.3-Flash-Trial", Payload: payload, StorageJSON: storage(c), Headers: http.Header{"Anthropic-Beta": {"bad"}, "X-Session-Id": {"conversation"}}, Query: url.Values{"beta": {"true"}}}
+	c := credential{Site: "bigmodel", JWT: "session.fake", Device: "00000000-0000-4000-8000-000000000001", UID: "uid"}
+	payload := []byte(`{"model":"GLM-5.3-Flash","system":[{"type":"text","text":"agent rules"}],"messages":[{"role":"user","content":[{"type":"text","text":"hello","cache_control":{"type":"ephemeral"}},{"type":"text","text":"last"}]}],"tools":[{"name":"Bash","cache_control":{"type":"ephemeral"}}],"max_tokens":100}`)
+	req := pluginapi.ExecutorRequest{AuthID: "fixture", Model: "GLM-5.3-Flash", Payload: payload, StorageJSON: storage(c), Headers: http.Header{"Anthropic-Beta": {"bad"}, "X-Session-Id": {"conversation"}}, Query: url.Values{"beta": {"true"}}}
 	plan, err := prepareRequest(req, sender)
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +278,7 @@ func TestGiftRequestWrapperAndPaidRoute(t *testing.T) {
 		t.Fatal("invalid body")
 	}
 	if body["model"] != "GLM-5.3-Flash" {
-		t.Fatal("trial suffix not removed")
+		t.Fatal("gift model changed")
 	}
 	system := body["system"].([]any)
 	if len(system) != 3 || asMap(system[0])["text"] != prompt.CliPrefix || asMap(system[1])["text"] != strings.Join(prompt.StableSections, "\n\n") || !strings.Contains(asMap(system[2])["text"].(string), "agent rules") {
@@ -237,17 +303,14 @@ func TestGiftRequestWrapperAndPaidRoute(t *testing.T) {
 	if json.Unmarshal([]byte(asMap(body["metadata"])["user_id"].(string)), &user) != nil || user["device_id"] != c.Device || user["session_id"] != plan.HTTP.Headers.Get("x-session-id") {
 		t.Fatal("wrong user metadata")
 	}
-	req.Model = "GLM-5.3-Flash"
+	c.Key = "paid.fake"
+	req.StorageJSON = storage(c)
 	paid, err := prepareRequest(req, sender)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if paid.Gift || !strings.HasPrefix(paid.HTTP.URL, "https://open.bigmodel.cn/api/anthropic/v1/messages") || paid.HTTP.Headers.Get("x-api-key") != c.Key || paid.HTTP.Headers.Get("Authorization") != "Bearer "+c.Key {
 		t.Fatal("named paid model did not use plan")
-	}
-	req.Model = "GLM-5.2-Trial"
-	if _, err = prepareRequest(req, sender); err == nil {
-		t.Fatal("future trial unexpectedly routed")
 	}
 }
 func TestErrorClassification(t *testing.T) {
@@ -521,7 +584,7 @@ func TestModelsFromVendorCatalogAndGiftBalance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Models) != 2 || response.Models[0].ID != "GLM-5.3-Flash" || response.Models[0].ContextLength != 900000 || response.Models[0].MaxCompletionTokens != 120000 || response.Models[0].Thinking.Levels[0] != "none" || response.Models[1].ID != "GLM-5.3-Flash-Trial" {
+	if len(response.Models) != 1 || response.Models[0].ID != "GLM-5.3-Flash" || response.Models[0].ContextLength != 900000 || response.Models[0].MaxCompletionTokens != 120000 || response.Models[0].Thinking.Levels[0] != "none" {
 		t.Fatalf("wrong catalog models: %v", len(response.Models))
 	}
 }
@@ -539,7 +602,7 @@ func TestQuotaFailureKeepsKnownPlan(t *testing.T) {
 		t.Fatal("failed reads hid known subscription")
 	}
 }
-func TestGiftRetryWaitAndNoPaidFallback(t *testing.T) {
+func TestGiftModelCheckHasNoUpstreamFallback(t *testing.T) {
 	setAuthDir(t.TempDir())
 	now := time.Now().Unix()
 	var calls []string
@@ -550,13 +613,13 @@ func TestGiftRetryWaitAndNoPaidFallback(t *testing.T) {
 		}
 		return pluginapi.HTTPResponse{}, fmt.Errorf("unexpected request")
 	}}
-	c := credential{Site: "zai", Key: "paid-key", JWT: "jwt", Device: "device", UID: "no-fallback"}
-	_, err := execute(pluginapi.ExecutorRequest{AuthID: "no-fallback", Model: "GLM-5.2-Trial", StorageJSON: storage(c), Payload: []byte(`{"model":"GLM-5.2-Trial","messages":[]}`)}, sender)
+	c := credential{Site: "zai", JWT: "jwt", Device: "device", UID: "no-fallback"}
+	_, err := execute(pluginapi.ExecutorRequest{AuthID: "no-fallback", Model: "GLM-5.2", StorageJSON: storage(c), Payload: []byte(`{"model":"GLM-5.2","messages":[]}`)}, sender)
 	if err == nil {
-		t.Fatal("future trial should fail")
+		t.Fatal("unavailable gift model should fail")
 	}
 	if len(calls) != 1 || !strings.Contains(calls[0], "billing/balance") {
-		t.Fatal("trial made another upstream request")
+		t.Fatal("gift eligibility failure made an upstream request")
 	}
 }
 func TestConcurrencyGatePerCredential(t *testing.T) {

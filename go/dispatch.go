@@ -26,6 +26,10 @@ type rpcQuota struct {
 	pluginapi.QuotaFetchRequest
 	CallbackID string `json:"host_callback_id"`
 }
+type rpcManagement struct {
+	pluginapi.ManagementRequest
+	CallbackID string `json:"host_callback_id"`
+}
 type rpcExecution struct {
 	pluginapi.ExecutorRequest
 	CallbackID string `json:"host_callback_id"`
@@ -42,14 +46,12 @@ func unmarshal(raw []byte, out any) error {
 	return nil
 }
 func registration() any {
-	return map[string]any{"schema_version": pluginabi.SchemaVersion, "metadata": pluginapi.Metadata{Name: "OMC ZCode OAuth", Version: pluginVersion, Author: "JUNZE", GitHubRepository: "https://github.com/WizisCool/omc-zcode-oauth", Logo: "https://raw.githubusercontent.com/WizisCool/omc-zcode-oauth/refs/heads/main/assets/logo.svg", ConfigFields: []pluginapi.ConfigField{
-		{Name: "site", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"zai", "bigmodel"}, Description: "Default OAuth site (default zai)."},
+	return map[string]any{"schema_version": pluginabi.SchemaVersion, "metadata": pluginapi.Metadata{Name: "OMC ZCode OAuth", Version: pluginVersion, Author: "JUNZE", GitHubRepository: "https://github.com/WizisCool/omc-zcode-oauth", Logo: "https://raw.githubusercontent.com/WizisCool/omc-zcode-oauth/refs/heads/main/assets/logo.png", ConfigFields: []pluginapi.ConfigField{
 		{Name: "mode", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"own", "team"}, Description: "Default OAuth plan selection (default own)."},
-		{Name: "prefer_gift", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Suggest explicit -Trial models; never changes named-model routing."},
 		{Name: "max_concurrency", Type: pluginapi.ConfigFieldTypeInteger, Description: "Maximum simultaneous requests per credential (default 3)."},
 		{Name: "app_version", Type: pluginapi.ConfigFieldTypeString, Description: "ZCode client version (default 3.16.3)."},
 		{Name: "team_language", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"zh", "en"}, Description: "Team business API language (default en)."},
-	}}, "capabilities": map[string]any{"auth_provider": true, "model_provider": true, "executor": true, "executor_model_scope": "oauth", "executor_input_formats": []string{"claude"}, "executor_output_formats": []string{"claude"}, "quota_provider": true}}
+	}}, "capabilities": map[string]any{"auth_provider": true, "model_provider": true, "executor": true, "executor_model_scope": "oauth", "executor_input_formats": []string{"claude"}, "executor_output_formats": []string{"claude"}, "quota_provider": true, "management_api": true}}
 }
 func handleMethod(method string, raw []byte) (any, error) {
 	switch method {
@@ -99,6 +101,19 @@ func handleMethod(method string, raw []byte) (any, error) {
 		return v, nil
 	case "auth.refresh":
 		return nil, pluginabi.NewError("reauth_required", "ZCode sessions cannot be refreshed; sign in again", 400)
+	case "management.register":
+		return map[string]any{"resources": []map[string]any{
+			{"path": "/oauth-select", "menu": "", "description": "Choose Z.AI or BigModel.cn before sign-in."},
+			{"path": "/oauth-start", "menu": "", "description": "Start the selected ZCode site sign-in."},
+			{"path": "/zai.png", "menu": "", "description": "Z.AI sign-in logo."},
+			{"path": "/bigmodel.png", "menu": "", "description": "BigModel sign-in logo."},
+		}}, nil
+	case "management.handle":
+		var r rpcManagement
+		if err := unmarshal(raw, &r); err != nil {
+			return nil, err
+		}
+		return handleOAuthResource(r.ManagementRequest, r.CallbackID)
 	case "model.static":
 		return pluginapi.ModelResponse{Provider: "zcode"}, nil
 	case "model.for_auth":

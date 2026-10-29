@@ -143,11 +143,6 @@ func prepareRequest(req pluginapi.ExecutorRequest, sender httpSender) (requestPl
 		return plan, pluginabi.NewError("invalid_request", "model is required", 400)
 	}
 	gift := c.Key == ""
-	trial := strings.HasSuffix(strings.ToLower(model), "-trial")
-	if trial {
-		gift = true
-		model = model[:len(model)-len("-Trial")]
-	}
 	if gift {
 		if c.JWT == "" {
 			return plan, pluginabi.NewError("invalid_auth", "ZCode gift sign-in required", 401)

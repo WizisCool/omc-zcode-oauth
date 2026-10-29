@@ -23,6 +23,7 @@ type loginState struct {
 	Interval           uint32
 	Nonce              []byte
 	Bearer             []byte
+	Choice             bool
 }
 
 var stateKeyMu sync.Mutex
@@ -106,6 +107,9 @@ func sealState(key []byte, s loginState) (string, error) {
 	if s.Mode == "team" {
 		flags |= 2
 	}
+	if s.Choice {
+		flags |= 8
+	}
 	flow := []byte(s.FlowID)
 	if len(s.FlowID) == 32 && strings.ToLower(s.FlowID) == s.FlowID {
 		if decoded, e := hex.DecodeString(s.FlowID); e == nil {
@@ -145,7 +149,7 @@ func openState(key []byte, encoded string) (loginState, error) {
 	}
 	nonce := raw[:12]
 	p, err := gcm.Open(nil, nonce, raw[12:], []byte("zcode-login-v1"))
-	if err != nil || len(p) < 47 || p[0] != 1 || p[1]&^byte(7) != 0 {
+	if err != nil || len(p) < 47 || p[0] != 1 || p[1]&^byte(15) != 0 {
 		return s, errors.New("invalid login state")
 	}
 	flow := string(p[46:])
@@ -155,8 +159,10 @@ func openState(key []byte, encoded string) (loginState, error) {
 		}
 		flow = hex.EncodeToString(p[46:])
 	}
-	s = loginState{Site: "zai", Mode: "own", Expires: int64(binary.BigEndian.Uint64(p[2:10])), Interval: binary.BigEndian.Uint32(p[10:14]), FlowID: flow, Nonce: append([]byte(nil), nonce...), Bearer: append([]byte(nil), p[14:46]...)}
-	if p[1]&1 != 0 {
+	s = loginState{Site: "zai", Mode: "own", Expires: int64(binary.BigEndian.Uint64(p[2:10])), Interval: binary.BigEndian.Uint32(p[10:14]), FlowID: flow, Nonce: append([]byte(nil), nonce...), Bearer: append([]byte(nil), p[14:46]...), Choice: p[1]&8 != 0}
+	if s.Choice {
+		s.Site = ""
+	} else if p[1]&1 != 0 {
 		s.Site = "bigmodel"
 	}
 	if p[1]&2 != 0 {

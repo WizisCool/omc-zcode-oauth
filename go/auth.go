@@ -55,14 +55,56 @@ func field(m map[string]any, k, fallback string) string {
 	}
 	return fallback
 }
+
+type vendorLoginFlow struct {
+	FlowID   string
+	URL      string
+	Interval uint32
+	Expires  int64
+}
+
+func beginVendorFlow(sender httpSender, site, appVersion string, bearerBytes []byte) (vendorLoginFlow, error) {
+	var flow vendorLoginFlow
+	bearer, device := deriveStateValues(bearerBytes)
+	data, err := apiCall(sender, "POST", zcodeRoot+"/api/v1/oauth/cli/init", "Bearer "+bearer, device, nil, map[string]string{"provider": site})
+	if err != nil {
+		return flow, err
+	}
+	var response struct {
+		FlowID   string `json:"flow_id"`
+		URL      string `json:"authorize_url"`
+		Interval uint32 `json:"poll_interval_sec"`
+		Expires  int64  `json:"expires_at"`
+	}
+	if json.Unmarshal(data, &response) != nil || response.FlowID == "" || response.Expires <= time.Now().Unix() {
+		return flow, errors.New("ZCode returned an invalid login flow")
+	}
+	u, err := url.Parse(response.URL)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return flow, errors.New("ZCode returned an invalid authorization URL")
+	}
+	redirect := zcodeRoot + "/app/oauth/login?" + url.Values{"redirect": {"zcode://oauth/callback"}, "app_version": {appVersion}}.Encode()
+	q := u.Query()
+	if site == "bigmodel" {
+		q.Set("redirect", redirect)
+	} else {
+		q.Set("redirect_uri", redirect)
+	}
+	u.RawQuery = q.Encode()
+	return vendorLoginFlow{FlowID: response.FlowID, URL: u.String(), Interval: response.Interval, Expires: response.Expires}, nil
+}
+
 func startLogin(req pluginapi.AuthLoginStartRequest, sender httpSender) (pluginapi.AuthLoginStartResponse, error) {
 	var out pluginapi.AuthLoginStartResponse
 	cfg := getConfig()
-	site := field(req.Metadata, "site", cfg.Site)
 	mode := field(req.Metadata, "mode", cfg.Mode)
-	if (site != "zai" && site != "bigmodel") || (mode != "own" && mode != "team") {
-		return out, errors.New("invalid site or mode")
+	if mode != "own" && mode != "team" {
+		return out, errors.New("invalid login mode")
 	}
+	if req.Host.AuthDir == "" {
+		return out, errors.New("CPA auth directory unavailable")
+	}
+	setLoginAuthDir(req.Host.AuthDir)
 	key, err := loadStateKey(req.Host.AuthDir)
 	if err != nil {
 		return out, err
@@ -71,45 +113,47 @@ func startLogin(req pluginapi.AuthLoginStartRequest, sender httpSender) (plugina
 	if err != nil {
 		return out, errors.New("cannot generate login state")
 	}
-	bearerBytes := make([]byte, 32)
-	if _, err = io.ReadFull(rand.Reader, bearerBytes); err != nil {
+	bearerBytes, err := newRandomBytes(32)
+	if err != nil {
 		return out, errors.New("cannot generate login bearer")
 	}
-	bearer, device := deriveStateValues(bearerBytes)
-	data, err := apiCall(sender, "POST", zcodeRoot+"/api/v1/oauth/cli/init", "Bearer "+bearer, device, nil, map[string]string{"provider": site})
+	site := field(req.Metadata, "site", "")
+	if site == "" {
+		flowID, err := newRandomFlowID()
+		if err != nil {
+			return out, errors.New("cannot generate login state")
+		}
+		expires := time.Now().Add(10 * time.Minute).Unix()
+		state, err := sealState(key, loginState{FlowID: flowID, Mode: mode, Expires: expires, Nonce: nonce, Bearer: bearerBytes, Choice: true})
+		if err != nil {
+			return out, err
+		}
+		chooser, err := loginChooserURL(req.BaseURL, state)
+		if err != nil {
+			return out, err
+		}
+		return pluginapi.AuthLoginStartResponse{Provider: "zcode", URL: chooser, State: state, ExpiresAt: time.Unix(expires, 0).UTC()}, nil
+	}
+	if site != "zai" && site != "bigmodel" {
+		return out, errors.New("invalid login site")
+	}
+	flow, err := beginVendorFlow(sender, site, cfg.AppVersion, bearerBytes)
 	if err != nil {
 		return out, err
 	}
-	var flow struct {
-		FlowID   string `json:"flow_id"`
-		URL      string `json:"authorize_url"`
-		Interval uint32 `json:"poll_interval_sec"`
-		Expires  int64  `json:"expires_at"`
-	}
-	if json.Unmarshal(data, &flow) != nil || flow.FlowID == "" || flow.Expires <= time.Now().Unix() {
-		return out, errors.New("ZCode returned an invalid login flow")
-	}
-	u, err := url.Parse(flow.URL)
-	if err != nil || u.Scheme != "https" || u.Host == "" {
-		return out, errors.New("ZCode returned an invalid authorization URL")
-	}
-	redirect := zcodeRoot + "/app/oauth/login?" + url.Values{"redirect": {"zcode://oauth/callback"}, "app_version": {cfg.AppVersion}}.Encode()
-	q := u.Query()
-	if site == "bigmodel" {
-		q.Set("redirect", redirect)
-	} else {
-		q.Set("redirect_uri", redirect)
-	}
-	u.RawQuery = q.Encode()
 	state, err := sealState(key, loginState{FlowID: flow.FlowID, Site: site, Mode: mode, Expires: flow.Expires, Interval: flow.Interval, Nonce: nonce, Bearer: bearerBytes})
 	if err != nil {
 		return out, err
 	}
-	return pluginapi.AuthLoginStartResponse{Provider: "zcode", URL: u.String(), State: state, ExpiresAt: time.Unix(flow.Expires, 0).UTC()}, nil
+	return pluginapi.AuthLoginStartResponse{Provider: "zcode", URL: flow.URL, State: state, ExpiresAt: time.Unix(flow.Expires, 0).UTC()}, nil
 }
+
 func pollLogin(req pluginapi.AuthLoginPollRequest, sender httpSender) (pluginapi.AuthLoginPollResponse, error) {
 	pending := pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusPending}
-	key, err := loadStateKey(req.Host.AuthDir)
+	if req.Host.AuthDir != "" {
+		setLoginAuthDir(req.Host.AuthDir)
+	}
+	key, err := loadStateKey(currentLoginAuthDir())
 	if err != nil {
 		return pending, err
 	}
@@ -117,9 +161,34 @@ func pollLogin(req pluginapi.AuthLoginPollRequest, sender httpSender) (pluginapi
 	if err != nil {
 		return pending, err
 	}
+	choiceID := s.FlowID
+	if s.Choice {
+		selected, ok := pendingLogin(choiceID)
+		if !ok {
+			if time.Now().Unix() >= s.Expires {
+				return pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusError, Message: "ZCode sign-in expired; sign in again"}, nil
+			}
+			return pending, nil
+		}
+		s = loginState{FlowID: selected.FlowID, Site: selected.Site, Mode: selected.Mode, Expires: selected.Expires, Interval: selected.Interval, Bearer: selected.Bearer}
+	}
 	if time.Now().Unix() >= s.Expires {
 		return pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusError, Message: "ZCode sign-in expired; sign in again"}, nil
 	}
+	response, err := pollVendorFlow(s, sender)
+	if err != nil {
+		return pending, err
+	}
+	if s.Choice || choiceID != "" {
+		if response.Status != pluginapi.AuthLoginStatusPending {
+			clearPendingLogin(choiceID)
+		}
+	}
+	return response, nil
+}
+
+func pollVendorFlow(s loginState, sender httpSender) (pluginapi.AuthLoginPollResponse, error) {
+	pending := pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusPending}
 	bearer, device := deriveStateValues(s.Bearer)
 	data, err := apiCall(sender, "GET", zcodeRoot+"/api/v1/oauth/cli/poll/"+url.PathEscape(s.FlowID), "Bearer "+bearer, device, nil, nil)
 	if err != nil {
@@ -196,6 +265,21 @@ func pollLogin(req pluginapi.AuthLoginPollRequest, sender httpSender) (pluginapi
 	}
 	return pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusSuccess, Auth: auth}, nil
 }
+
+func newRandomBytes(n int) ([]byte, error) {
+	b := make([]byte, n)
+	_, err := io.ReadFull(rand.Reader, b)
+	return b, err
+}
+
+func newRandomFlowID() (string, error) {
+	b, err := newRandomBytes(16)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
 func rawString(v json.RawMessage) string {
 	var s string
 	if json.Unmarshal(v, &s) == nil {

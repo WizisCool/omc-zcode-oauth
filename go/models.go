@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/url"
 	"regexp"
 	"runtime"
@@ -227,57 +226,41 @@ func modelsForAuth(req pluginapi.AuthModelRequest, sender httpSender) (pluginapi
 		return pluginapi.ModelResponse{}, err
 	}
 	models := catalogModels(fetchCatalog(sender), c)
+	if c.Key != "" {
+		return pluginapi.ModelResponse{Provider: "zcode", Models: models}, nil
+	}
 	balance, err := fetchBalance(sender, c)
-	if err == nil {
-		existing := map[string]pluginapi.ModelInfo{}
-		for _, m := range models {
-			existing[strings.ToLower(m.ID)] = m
+	if err != nil {
+		return pluginapi.ModelResponse{Provider: "zcode", Models: models}, nil
+	}
+	existing := map[string]pluginapi.ModelInfo{}
+	for _, m := range models {
+		existing[strings.ToLower(m.ID)] = m
+	}
+	now := balance.now()
+	for _, b := range balance.Balances {
+		if !bucketUsable(b, now) {
+			continue
 		}
-		seen := map[string]bool{}
-		now := balance.now()
-		for _, b := range balance.Balances {
-			if !bucketUsable(b, now) {
+		active := false
+		for _, p := range balance.Plans {
+			if samePlan(p, b) && livePlan(p, now) {
+				active = true
+				break
+			}
+		}
+		if !active {
+			continue
+		}
+		for _, name := range bucketModels(b) {
+			key := strings.ToLower(name)
+			if _, ok := existing[key]; ok {
 				continue
 			}
-			active := false
-			for _, p := range balance.Plans {
-				if samePlan(p, b) && livePlan(p, now) {
-					active = true
-					break
-				}
-			}
-			if !active {
-				continue
-			}
-			for _, name := range bucketModels(b) {
-				key := strings.ToLower(name)
-				if seen[key] {
-					continue
-				}
-				seen[key] = true
-				m, ok := existing[key]
-				if !ok {
-					m = modelInfo(name, 0, 0, nil)
-				}
-				m.ID += "-Trial"
-				m.Name = m.ID
-				m.DisplayName = m.ID
-				models = append(models, m)
-				if c.Key == "" && !ok {
-					normal := m
-					normal.ID = name
-					normal.Name = name
-					normal.DisplayName = name
-					models = append(models, normal)
-				}
-			}
+			m := modelInfo(name, 0, 0, nil)
+			models = append(models, m)
+			existing[key] = m
 		}
 	}
 	return pluginapi.ModelResponse{Provider: "zcode", Models: models}, nil
-}
-func requireTrial(balance balanceData, model string) error {
-	if !giftHasModel(balance, model) {
-		return fmt.Errorf("no usable gift bucket for model %s", model)
-	}
-	return nil
 }
