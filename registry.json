@@ -12,7 +12,6 @@
       "homepage": "https://github.com/WizisCool/omc-zcode-oauth",
       "license": "MIT",
       "tags": ["Provider", "OAuth", "Quota", "GLM", "ZCode"],
-      "auth_required": true,
       "install": {"type": "github-release"}
     }
   ]
