@@ -75,13 +75,17 @@ CI builds these release artifacts from a tag:
 ```text
 omc-zcode-oauth_<version>_linux_amd64.zip
 omc-zcode-oauth_<version>_linux_arm64.zip
+omc-zcode-oauth_<version>_darwin_amd64.zip
 omc-zcode-oauth_<version>_darwin_arm64.zip
+omc-zcode-oauth_<version>_windows_amd64.zip
+omc-zcode-oauth_<version>_windows_arm64.zip
 checksums.txt
 ```
 
-Each archive contains the correctly named `omc-zcode-oauth.so` or
-`omc-zcode-oauth.dylib`. Local native builds use `make build`; `make package`
-creates the same archive format.
+Each archive contains the correctly named `omc-zcode-oauth.so`,
+`omc-zcode-oauth.dylib`, or `omc-zcode-oauth.dll`. CI builds all six targets;
+local native builds use `make build`, and `make package` creates the same
+archive format.
 
 ## Project layout
 

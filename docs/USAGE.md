@@ -28,18 +28,21 @@ Use CPA's plugin store to install `omc-zcode-oauth`, or call:
 POST /v0/management/plugin-store/omc-zcode-oauth/install
 ```
 
-A specific tagged release can be selected with `?version=0.1.1`. The release
-archive is installed under
-`<plugins-dir>/<os>/<arch>/omc-zcode-oauth.so`; macOS uses
-`omc-zcode-oauth.dylib`. Restart CPA if it reports that the loaded plugin must
-be replaced.
+A specific tagged release can be selected with `?version=0.1.2`. The release
+archive is installed under `<plugins-dir>/<os>/<arch>/` as
+`omc-zcode-oauth.so`, `omc-zcode-oauth.dylib`, or `omc-zcode-oauth.dll`, depending
+on the target platform. Restart CPA if it reports that the loaded plugin must be
+replaced.
 
 Manual layout:
 
 ```text
 <plugins-dir>/linux/amd64/omc-zcode-oauth.so
 <plugins-dir>/linux/arm64/omc-zcode-oauth.so
+<plugins-dir>/darwin/amd64/omc-zcode-oauth.dylib
 <plugins-dir>/darwin/arm64/omc-zcode-oauth.dylib
+<plugins-dir>/windows/amd64/omc-zcode-oauth.dll
+<plugins-dir>/windows/arm64/omc-zcode-oauth.dll
 ```
 
 ## Build locally
@@ -50,12 +53,12 @@ go mod download
 GOPROXY=off GOSUMDB=off go test ./...
 GOPROXY=off GOSUMDB=off go vet ./...
 cd ..
-make build VERSION=0.1.1
-make package VERSION=0.1.1
+make build VERSION=0.1.2
+make package VERSION=0.1.2
 ```
 
 `make build` uses the current machine's OS and architecture. Official release
-artifacts for Linux amd64, Linux arm64 and Darwin arm64 are built by the
+artifacts for Linux, macOS and Windows on both amd64 and arm64 are built by the
 `.github/workflows/build.yml` workflow when a `v*` tag is pushed.
 
 ## Sign in
@@ -132,7 +135,7 @@ contain the business token those endpoints require.
   replaced.
 - **No models appear:** inspect model discovery errors in CPA logs and confirm
   the credential status is active.
-- **The site chooser does not open:** verify that the plugin version is `0.1.1`
+- **The site chooser does not open:** verify that the plugin version is `0.1.2`
   or newer and that CPA can reach its own `/v0/resource/plugins/` routes.
 - **Login stays pending:** complete the browser flow for the selected site.
   International and China accounts are separate; choose `Z.AI` or

@@ -53,9 +53,23 @@ jobs:
             runner: ubuntu-24.04-arm
             ext: so
           - goos: darwin
+            goarch: amd64
+            runner: macos-15-intel
+            ext: dylib
+          - goos: darwin
             goarch: arm64
             runner: macos-15
             ext: dylib
+          - goos: windows
+            goarch: amd64
+            runner: ubuntu-24.04
+            ext: dll
+            zig_target: x86_64-windows-gnu
+          - goos: windows
+            goarch: arm64
+            runner: ubuntu-24.04
+            ext: dll
+            zig_target: aarch64-windows-gnu
     defaults:
       run:
         shell: bash
@@ -75,6 +89,30 @@ jobs:
           fi
           echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
           echo "ARCHIVE_NAME=${PLUGIN_ID}_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" >> "${GITHUB_ENV}"
+      - name: Install Zig for Windows builds
+        if: matrix.goos == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          zig_archive="${RUNNER_TEMP}/zig-0.17.0.tar.xz"
+          curl -fsSL "https://ziglang.org/download/0.17.0/zig-x86_64-linux-0.17.0.tar.xz" -o "${zig_archive}"
+          echo "1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026  ${zig_archive}" | sha256sum -c -
+          mkdir -p "${RUNNER_TEMP}/zig"
+          tar -xJf "${zig_archive}" -C "${RUNNER_TEMP}/zig" --strip-components=1
+          echo "${RUNNER_TEMP}/zig" >> "${GITHUB_PATH}"
+      - name: Configure Windows C compiler
+        if: matrix.goos == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          wrapper="${RUNNER_TEMP}/zigcc/${{ matrix.goarch }}-w64-mingw32-gcc"
+          mkdir -p "$(dirname "${wrapper}")"
+          cat > "${wrapper}" <<EOF
+          #!/bin/sh
+          exec zig cc -target ${{ matrix.zig_target }} "\$@"
+          EOF
+          chmod +x "${wrapper}"
+          echo "CC=${wrapper}" >> "${GITHUB_ENV}"
       - name: Download modules
         working-directory: go
         run: go mod download
