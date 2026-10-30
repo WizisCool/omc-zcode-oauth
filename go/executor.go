@@ -397,16 +397,86 @@ func openUpstreamStream(plan requestPlan, callbackID string) (string, error) {
 	return response.StreamID, nil
 }
 
+// streamFramer turns upstream SSE bytes into the chunk shape the host expects for
+// the client protocol. An Anthropic client receives the upstream bytes untouched;
+// every other protocol is converted host-side, and that converter only accepts
+// one event per chunk, prefixed with "data:" and starting at byte zero.
+type streamFramer struct {
+	dataOnly bool
+	pending  []byte
+}
+
+func (f *streamFramer) next(chunk []byte) [][]byte {
+	if !f.dataOnly {
+		if len(chunk) == 0 {
+			return nil
+		}
+		return [][]byte{chunk}
+	}
+	f.pending = bytes.ReplaceAll(append(f.pending, chunk...), []byte("\r\n"), []byte("\n"))
+	var frames [][]byte
+	for {
+		i := bytes.Index(f.pending, []byte("\n\n"))
+		if i < 0 {
+			return frames
+		}
+		if frame := streamDataFrame(f.pending[:i]); frame != nil {
+			frames = append(frames, frame)
+		}
+		f.pending = f.pending[i+2:]
+	}
+}
+
+// flush releases a trailing event that the upstream ended without a blank line.
+func (f *streamFramer) flush() [][]byte {
+	if !f.dataOnly || len(f.pending) == 0 {
+		return nil
+	}
+	frame := streamDataFrame(f.pending)
+	f.pending = nil
+	if frame == nil {
+		return nil
+	}
+	return [][]byte{frame}
+}
+
+// streamDataFrame rebuilds one SSE event as a single "data:" payload.
+func streamDataFrame(event []byte) []byte {
+	var data []byte
+	for _, line := range bytes.Split(event, []byte("\n")) {
+		line = bytes.TrimSuffix(line, []byte("\r"))
+		if !bytes.HasPrefix(line, []byte("data:")) {
+			continue
+		}
+		if len(data) > 0 {
+			data = append(data, '\n')
+		}
+		data = append(data, bytes.TrimSpace(line[len("data:"):])...)
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	return append(append([]byte("data: "), data...), '\n', '\n')
+}
+
+// restoreDataFrame applies the search-tool rename to a single data frame and
+// keeps its event separator intact.
+func restoreDataFrame(frame []byte) []byte {
+	restored := restoreStreamLine(bytes.TrimRight(frame, "\n"))
+	return append(append(restored, '\n'), '\n')
+}
+
 // pumpStream copies one upstream stream into the target and reports whether the
 // upstream ended cleanly. emitted tracks payloads the client already received so
 // a caller never replays a stream that produced output.
-func pumpStream(source, target string, renamed bool, emitted *bool) bool {
+func pumpStream(source, target string, renamed, dataOnly bool, emitted *bool) bool {
 	var held []byte
-	emit := func(payload []byte) bool {
-		if len(payload) == 0 {
+	framer := streamFramer{dataOnly: dataOnly}
+	emit := func(frame []byte) bool {
+		if len(frame) == 0 {
 			return true
 		}
-		if emitStreamChunk(target, payload) != nil {
+		if emitStreamChunk(target, frame) != nil {
 			return false
 		}
 		*emitted = true
@@ -417,29 +487,48 @@ func pumpStream(source, target string, renamed bool, emitted *bool) bool {
 		if err != nil {
 			return false
 		}
-		payload := r.Payload
-		if renamed {
-			held = append(held, payload...)
-			if len(held) > 4<<20 {
+		if dataOnly {
+			for _, frame := range framer.next(r.Payload) {
+				if renamed {
+					frame = restoreDataFrame(frame)
+				}
+				if !emit(frame) {
+					return false
+				}
+			}
+		} else if payload := r.Payload; len(payload) > 0 {
+			if renamed {
+				held = append(held, payload...)
+				if len(held) > 4<<20 {
+					return false
+				}
+				var ready []byte
+				for {
+					i := bytes.IndexByte(held, '\n')
+					if i < 0 {
+						break
+					}
+					ready = append(ready, restoreStreamLine(held[:i])...)
+					ready = append(ready, '\n')
+					held = held[i+1:]
+				}
+				payload = ready
+			}
+			if !emit(payload) {
 				return false
 			}
-			var ready []byte
-			for {
-				i := bytes.IndexByte(held, '\n')
-				if i < 0 {
-					break
-				}
-				ready = append(ready, restoreStreamLine(held[:i])...)
-				ready = append(ready, '\n')
-				held = held[i+1:]
-			}
-			payload = ready
-		}
-		if !emit(payload) {
-			return false
 		}
 		if r.Done {
-			if len(held) > 0 {
+			if dataOnly {
+				for _, frame := range framer.flush() {
+					if renamed {
+						frame = restoreDataFrame(frame)
+					}
+					if !emit(frame) {
+						return false
+					}
+				}
+			} else if len(held) > 0 {
 				if !emit(restoreStreamLine(held)) {
 					return false
 				}
@@ -453,11 +542,11 @@ func pumpStream(source, target string, renamed bool, emitted *bool) bool {
 // emitted before the first upstream payload, so an upstream that closes empty or
 // breaks before that point is replayed with the identical request bytes; once
 // payload reached the client a failure is terminal.
-func forwardStream(source, target string, plan requestPlan, callbackID string, release func()) {
+func forwardStream(source, target string, plan requestPlan, callbackID string, dataOnly bool, release func()) {
 	defer release()
 	emitted := false
 	for attempt := 0; ; attempt++ {
-		finished := pumpStream(source, target, plan.Renamed, &emitted)
+		finished := pumpStream(source, target, plan.Renamed, dataOnly, &emitted)
 		closeHostStream(source)
 		if finished && emitted {
 			closeStream(target, "")
@@ -475,6 +564,26 @@ func forwardStream(source, target string, plan requestPlan, callbackID string, r
 		}
 		source = next
 	}
+}
+
+// dataFramedChunks reports whether stream chunks must be re-framed as one
+// `data:` payload per upstream event. CPA rewrites SourceFormat to this plugin's
+// own input format, so the client protocol is read from the request path the
+// host records: a Messages client consumes the upstream SSE untouched, while
+// every other client is converted by a host converter that only parses a chunk
+// beginning at byte zero with "data:" and holding exactly one event.
+func dataFramedChunks(req pluginapi.ExecutorRequest) bool {
+	path := strings.ToLower(strings.TrimSpace(requestPath(req)))
+	if path != "" {
+		return !strings.HasPrefix(path, "/v1/messages") && !strings.HasPrefix(path, "/v8/messages")
+	}
+	source := strings.ToLower(strings.TrimSpace(req.SourceFormat))
+	return source != "" && source != "claude"
+}
+
+func requestPath(req pluginapi.ExecutorRequest) string {
+	path, _ := req.Metadata["request_path"].(string)
+	return path
 }
 
 func executeStream(req pluginapi.ExecutorRequest, callbackID, streamID string, sender httpSender) (map[string]any, error) {
@@ -524,7 +633,7 @@ func executeStream(req pluginapi.ExecutorRequest, callbackID, streamID string, s
 			release()
 			return map[string]any{"headers": response.Headers, "chunks": []pluginapi.ExecutorStreamChunk{{Payload: raw}}}, nil
 		}
-		go forwardStream(response.StreamID, streamID, plan, callbackID, release)
+		go forwardStream(response.StreamID, streamID, plan, callbackID, dataFramedChunks(req), release)
 		return map[string]any{"headers": response.Headers}, nil
 	}
 }

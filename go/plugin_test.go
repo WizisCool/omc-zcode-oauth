@@ -456,7 +456,7 @@ func TestStreamReplaysUpstreamClosedBeforeFirstPayload(t *testing.T) {
 		return "2", nil
 	}
 	released := false
-	forwardStream("1", "target", requestPlan{HTTP: pluginapi.HTTPRequest{URL: "https://example.test/v1/messages"}}, "cb", func() { released = true })
+	forwardStream("1", "target", requestPlan{HTTP: pluginapi.HTTPRequest{URL: "https://example.test/v1/messages"}}, "cb", false, func() { released = true })
 
 	if opened != 1 {
 		t.Fatalf("replays = %d, want 1", opened)
@@ -487,7 +487,7 @@ func TestStreamNeverReplaysAfterPayload(t *testing.T) {
 		t.Fatal("stream must not be replayed after a payload reached the client")
 		return "", nil
 	}
-	forwardStream("1", "target", requestPlan{}, "cb", func() {})
+	forwardStream("1", "target", requestPlan{}, "cb", false, func() {})
 	if reads != 2 {
 		t.Fatalf("reads = %d, want 2", reads)
 	}
@@ -510,9 +510,98 @@ func TestStreamGivesUpAfterBoundedEmptyReplays(t *testing.T) {
 		opened++
 		return "next", nil
 	}
-	forwardStream("1", "target", requestPlan{}, "cb", func() {})
+	forwardStream("1", "target", requestPlan{}, "cb", false, func() {})
 	if opened != len(emptyStreamWaits) {
 		t.Fatalf("replays = %d, want %d", opened, len(emptyStreamWaits))
+	}
+}
+
+func TestStreamFramerEmitsOneDataFramePerEvent(t *testing.T) {
+	framer := streamFramer{dataOnly: true}
+	// The vendor sends several events per read and splits them at arbitrary byte
+	// offsets, while the host converter only accepts one `data:` payload per chunk.
+	upstream := []string{
+		"event: message_start\ndata: {\"type\":\"message_start\"}\n\nevent: ping\ndata: {\"ty",
+		"pe\":\"ping\"}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\"}\n\n",
+	}
+	var frames [][]byte
+	for _, chunk := range upstream {
+		frames = append(frames, framer.next([]byte(chunk))...)
+	}
+	want := []string{
+		"data: {\"type\":\"message_start\"}\n\n",
+		"data: {\"type\":\"ping\"}\n\n",
+		"data: {\"type\":\"content_block_delta\"}\n\n",
+	}
+	if len(frames) != len(want) {
+		t.Fatalf("frames = %q, want %d frames", frames, len(want))
+	}
+	for i, frame := range frames {
+		if string(frame) != want[i] {
+			t.Fatalf("frame %d = %q, want %q", i, frame, want[i])
+		}
+	}
+}
+
+func TestStreamFramerFlushesTrailingEventAndSkipsEmptyData(t *testing.T) {
+	framer := streamFramer{dataOnly: true}
+	if got := framer.next([]byte("event: ping\ndata: {\"type\":\"ping\"}")); len(got) != 0 {
+		t.Fatalf("incomplete event produced frames %q", got)
+	}
+	flush := framer.flush()
+	if len(flush) != 1 || string(flush[0]) != "data: {\"type\":\"ping\"}\n\n" {
+		t.Fatalf("flush = %q", flush)
+	}
+	empty := streamFramer{dataOnly: true}
+	if got := empty.next([]byte("event: ping\n\n")); len(got) != 0 {
+		t.Fatalf("event without data produced frames %q", got)
+	}
+}
+
+func TestStreamFramerKeepsClaudeFramesUntouched(t *testing.T) {
+	framer := streamFramer{}
+	chunk := []byte("event: message_start\ndata: {\"type\":\"message_start\"}\n\n")
+	frames := framer.next(chunk)
+	if len(frames) != 1 || string(frames[0]) != string(chunk) {
+		t.Fatalf("claude frames = %q", frames)
+	}
+	for _, tc := range []struct {
+		path, source string
+		want         bool
+	}{
+		{"/v1/messages", "claude", false},
+		{"/v1/messages?beta=1", "claude", false},
+		{"/v1/chat/completions", "claude", true},
+		{"/v1/responses", "claude", true},
+		{"/v1beta/models/x:streamGenerateContent", "claude", true},
+		{"", "claude", false},
+		{"", "openai", true},
+	} {
+		meta := map[string]any{}
+		if tc.path != "" {
+			meta["request_path"] = tc.path
+		}
+		req := pluginapi.ExecutorRequest{Metadata: meta, SourceFormat: tc.source}
+		if got := dataFramedChunks(req); got != tc.want {
+			t.Fatalf("dataFramedChunks(path=%q source=%q) = %v, want %v", tc.path, tc.source, got, tc.want)
+		}
+	}
+}
+
+func TestStreamDataFramingReachesOpenAIConverter(t *testing.T) {
+	// A converter-side regression guard: the frames this plugin emits for a
+	// non-Claude client must start at byte zero with "data:" and hold one event.
+	framer := streamFramer{dataOnly: true}
+	frames := framer.next([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n"))
+	if len(frames) != 1 {
+		t.Fatalf("frames = %q", frames)
+	}
+	frame := frames[0]
+	if !bytes.HasPrefix(frame, []byte("data:")) {
+		t.Fatalf("frame %q does not start with the data tag", frame)
+	}
+	if !json.Valid(bytes.TrimSpace(frame[len("data:"):])) {
+		t.Fatalf("frame payload %q is not one JSON event", frame[len("data:"):])
 	}
 }
 
