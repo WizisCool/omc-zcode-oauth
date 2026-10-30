@@ -120,7 +120,11 @@ func fallbackModels() []pluginapi.ModelInfo {
 	}
 }
 func modelInfo(id string, context, output int64, levels []string) pluginapi.ModelInfo {
-	return pluginapi.ModelInfo{ID: id, Name: id, DisplayName: id, Object: "model", OwnedBy: "zcode", Type: "zcode", ContextLength: context, InputTokenLimit: context, MaxCompletionTokens: output, OutputTokenLimit: output, Thinking: &pluginapi.ThinkingSupport{Levels: levels}}
+	id = strings.TrimSpace(id)
+	// The routing model ID is lowercase: ZCode echoes lowercase model names and
+	// CPA only resolves an uppercase request against a lowercase registration,
+	// never the other way round. The vendor spelling stays in the display fields.
+	return pluginapi.ModelInfo{ID: strings.ToLower(id), Name: id, DisplayName: id, Object: "model", OwnedBy: "zcode", Type: "zcode", ContextLength: context, InputTokenLimit: context, MaxCompletionTokens: output, OutputTokenLimit: output, Thinking: &pluginapi.ThinkingSupport{Levels: levels}}
 }
 func catalogModels(doc *catalog, c credential) []pluginapi.ModelInfo {
 	if doc == nil {
@@ -171,9 +175,7 @@ func catalogModels(doc *catalog, c credential) []pluginapi.ModelInfo {
 		for _, f := range fallbacks {
 			if strings.EqualFold(f.ID, id) {
 				m = f
-				m.ID = id
-				m.Name = id
-				m.DisplayName = id
+				m.Name, m.DisplayName = id, id
 				break
 			}
 		}

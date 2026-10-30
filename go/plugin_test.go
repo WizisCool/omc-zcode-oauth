@@ -349,6 +349,43 @@ func TestConfigValidatesSite(t *testing.T) {
 	}
 }
 
+func TestModelIDsAreLowercaseForRouting(t *testing.T) {
+	catalogCache.Lock()
+	catalogCache.value = nil
+	catalogCache.at = time.Time{}
+	catalogCache.Unlock()
+	now := time.Now().Unix()
+	sender := &fakeSender{reply: func(r pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+		switch {
+		case strings.Contains(r.URL, "/client/configs"):
+			return jsonReply(`{"configs":{"builtin_provider_config_json":"https://config.example.test/builtin.json"}}`), nil
+		case strings.Contains(r.URL, "config.example.test"):
+			return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"config":{"providerConfigRules":{"providerRules":[{"providerId":"account:zai-individual-coding-plan","builtinModelIds":["GLM-5.3-Flash","GLM-5-Turbo"]}]},"modelConfigRules":{"modelRules":[]}}}`)}, nil
+		case strings.Contains(r.URL, "billing/balance"):
+			return jsonReply(fixtureBalance(now)), nil
+		default:
+			t.Fatalf("unexpected model endpoint")
+			return pluginapi.HTTPResponse{}, nil
+		}
+	}}
+	c := credential{Site: "zai", Key: "key", JWT: "jwt", Device: "device"}
+	response, err := modelsForAuth(pluginapi.AuthModelRequest{StorageJSON: storage(c)}, sender)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Models) == 0 {
+		t.Fatal("no models discovered")
+	}
+	for _, m := range response.Models {
+		if m.ID != strings.ToLower(m.ID) {
+			t.Errorf("model ID %q is not lowercase; a lowercase request cannot route to it", m.ID)
+		}
+		if strings.TrimSpace(m.DisplayName) == "" {
+			t.Errorf("model %q lost its display name", m.ID)
+		}
+	}
+}
+
 func TestPollStatusClassification(t *testing.T) {
 	dir := t.TempDir()
 	key, _ := loadStateKey(dir)
@@ -730,7 +767,7 @@ func TestModelsFromVendorCatalogAndGiftBalance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Models) != 1 || response.Models[0].ID != "GLM-5.3-Flash" || response.Models[0].ContextLength != 900000 || response.Models[0].MaxCompletionTokens != 120000 || response.Models[0].Thinking.Levels[0] != "none" {
+	if len(response.Models) != 1 || response.Models[0].ID != "glm-5.3-flash" || response.Models[0].DisplayName != "GLM-5.3-Flash" || response.Models[0].ContextLength != 900000 || response.Models[0].MaxCompletionTokens != 120000 || response.Models[0].Thinking.Levels[0] != "none" {
 		t.Fatalf("wrong catalog models: %v", len(response.Models))
 	}
 }
