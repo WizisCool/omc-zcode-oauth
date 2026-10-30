@@ -386,6 +386,40 @@ func TestModelIDsAreLowercaseForRouting(t *testing.T) {
 	}
 }
 
+func TestGiftOnlyModelsListOnlyUsableBuckets(t *testing.T) {
+	catalogCache.Lock()
+	catalogCache.value = nil
+	catalogCache.at = time.Time{}
+	catalogCache.Unlock()
+	now := time.Now().Unix()
+	sender := &fakeSender{reply: func(r pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+		switch {
+		case strings.Contains(r.URL, "/client/configs"):
+			return jsonReply(`{"configs":{"builtin_provider_config_json":"https://config.example.test/builtin.json"}}`), nil
+		case strings.Contains(r.URL, "config.example.test"):
+			return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"config":{"providerConfigRules":{"providerRules":[{"providerId":"account:zai-start-plan","builtinModelIds":["GLM-5.3-Flash","GLM-5.2","GLM-5-Turbo"]}]},"modelConfigRules":{"modelRules":[{"modelMatch":"GLM-5.3-Flash","config":{"properties":{"contextWindow":900000}}}]}}}`)}, nil
+		case strings.Contains(r.URL, "billing/balance"):
+			return jsonReply(fixtureBalance(now)), nil
+		default:
+			t.Fatalf("unexpected model endpoint")
+			return pluginapi.HTTPResponse{}, nil
+		}
+	}}
+	c := credential{Site: "zai", Key: "", JWT: "jwt", Device: "device"}
+	response, err := modelsForAuth(pluginapi.AuthModelRequest{StorageJSON: storage(c)}, sender)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fixture holds one active bucket (GLM-5.3-Flash) and one future bucket
+	// (GLM-5.2), so a gift-only credential may only advertise the active model.
+	if len(response.Models) != 1 {
+		t.Fatalf("gift-only models = %v, want only the active bucket model", response.Models)
+	}
+	if got := response.Models[0]; got.ID != "glm-5.3-flash" || got.DisplayName != "GLM-5.3-Flash" || got.ContextLength != 900000 {
+		t.Fatalf("gift-only model = %+v", got)
+	}
+}
+
 func TestPollStatusClassification(t *testing.T) {
 	dir := t.TempDir()
 	key, _ := loadStateKey(dir)

@@ -165,17 +165,23 @@ func bucketModels(x giftBucket) []string {
 func giftHasModel(b balanceData, model string) bool {
 	now := b.now()
 	for _, x := range b.Balances {
-		if !bucketUsable(x, now) {
+		if !bucketUsable(x, now) || !bucketPlanActive(b, x, now) {
 			continue
 		}
-		for _, p := range b.Plans {
-			if livePlan(p, now) && samePlan(p, x) {
-				for _, m := range bucketModels(x) {
-					if strings.EqualFold(m, model) {
-						return true
-					}
-				}
+		for _, m := range bucketModels(x) {
+			if strings.EqualFold(m, model) {
+				return true
 			}
+		}
+	}
+	return false
+}
+
+// bucketPlanActive reports whether the bucket belongs to a plan that is live now.
+func bucketPlanActive(b balanceData, x giftBucket, now float64) bool {
+	for _, p := range b.Plans {
+		if samePlan(p, x) && livePlan(p, now) {
+			return true
 		}
 	}
 	return false

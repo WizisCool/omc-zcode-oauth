@@ -235,34 +235,36 @@ func modelsForAuth(req pluginapi.AuthModelRequest, sender httpSender) (pluginapi
 	if err != nil {
 		return pluginapi.ModelResponse{Provider: "zcode", Models: models}, nil
 	}
-	existing := map[string]pluginapi.ModelInfo{}
+	// A gift-only credential reaches exactly the models with an active gift
+	// bucket, so that bucket set is the truthful catalogue; the vendor catalogue
+	// only supplies metadata for names it also knows. An account with no usable
+	// bucket keeps the catalogue so a flaky balance read cannot hide everything.
+	known := make(map[string]pluginapi.ModelInfo, len(models))
 	for _, m := range models {
-		existing[strings.ToLower(m.ID)] = m
+		known[strings.ToLower(m.ID)] = m
 	}
 	now := balance.now()
+	gift := make([]pluginapi.ModelInfo, 0, len(models))
+	seen := map[string]bool{}
 	for _, b := range balance.Balances {
-		if !bucketUsable(b, now) {
-			continue
-		}
-		active := false
-		for _, p := range balance.Plans {
-			if samePlan(p, b) && livePlan(p, now) {
-				active = true
-				break
-			}
-		}
-		if !active {
+		if !bucketUsable(b, now) || !bucketPlanActive(balance, b, now) {
 			continue
 		}
 		for _, name := range bucketModels(b) {
-			key := strings.ToLower(name)
-			if _, ok := existing[key]; ok {
+			key := strings.ToLower(strings.TrimSpace(name))
+			if key == "" || seen[key] {
 				continue
 			}
-			m := modelInfo(name, 0, 0, nil)
-			models = append(models, m)
-			existing[key] = m
+			seen[key] = true
+			m, ok := known[key]
+			if !ok {
+				m = modelInfo(name, 0, 0, nil)
+			}
+			gift = append(gift, m)
 		}
 	}
-	return pluginapi.ModelResponse{Provider: "zcode", Models: models}, nil
+	if len(gift) == 0 {
+		return pluginapi.ModelResponse{Provider: "zcode", Models: models}, nil
+	}
+	return pluginapi.ModelResponse{Provider: "zcode", Models: gift}, nil
 }
