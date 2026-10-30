@@ -135,6 +135,9 @@ Each archive contains the correctly named `omc-zcode-oauth.so`,
 local native builds use `make build`, and `make package` creates the same
 archive format.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions, test expectations, and
+ecosystem development standards.
+
 ## Project layout
 
 ```text

@@ -124,6 +124,8 @@ checksums.txt
 `omc-zcode-oauth.dll`。CI 构建全部六个目标；本地原生构建使用 `make build`，
 `make package` 生成相同格式的压缩包。
 
+提交规范、测试要求与生态开发习惯参见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 ## 项目结构
 
 ```text
