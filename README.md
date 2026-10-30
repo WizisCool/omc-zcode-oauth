@@ -5,8 +5,12 @@
 <h1 align="center">OMC ZCode OAuth</h1>
 
 <p align="center">
-  <a href="https://github.com/WizisCool/oh-my-cpa"><img src="https://raw.githubusercontent.com/WizisCool/oh-my-cpa/main/web/src/assets/brand/omc-wordmark-light.svg#gh-light-mode-only" alt="Oh-My-CPA" height="22"></a>
-  <a href="https://github.com/WizisCool/oh-my-cpa"><img src="https://raw.githubusercontent.com/WizisCool/oh-my-cpa/main/web/src/assets/brand/omc-wordmark-dark.svg#gh-dark-mode-only" alt="Oh-My-CPA" height="22"></a>
+  <a href="https://github.com/WizisCool/oh-my-cpa">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/WizisCool/oh-my-cpa/main/web/src/assets/brand/omc-wordmark-dark.svg">
+      <img src="https://raw.githubusercontent.com/WizisCool/oh-my-cpa/main/web/src/assets/brand/omc-wordmark-light.svg" alt="Oh-My-CPA" height="22">
+    </picture>
+  </a>
 </p>
 
 <p align="center">
