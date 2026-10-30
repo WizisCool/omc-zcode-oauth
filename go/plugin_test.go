@@ -271,6 +271,84 @@ func TestConfigValidatesPublicBaseURL(t *testing.T) {
 	}
 }
 
+func TestConfiguredSiteSkipsLocalChooser(t *testing.T) {
+	t.Cleanup(func() {
+		if err := configure(nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	now := time.Now().Unix()
+	for _, tc := range []struct {
+		name                                   string
+		site, metadata, wantProvider, wantHost string
+	}{
+		{"configured zai goes straight to the vendor", "zai", "", "zai", "chat.z.ai"},
+		{"configured bigmodel goes straight to the vendor", "bigmodel", "", "bigmodel", "bigmodel.cn"},
+		{"request metadata overrides the configured site", "bigmodel", "zai", "zai", "chat.z.ai"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := configure([]byte("site: " + tc.site + "\n")); err != nil {
+				t.Fatal(err)
+			}
+			var initProvider string
+			sender := &fakeSender{reply: func(r pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+				if !strings.HasSuffix(r.URL, "/oauth/cli/init") {
+					t.Fatalf("unexpected URL %s", r.URL)
+				}
+				var body map[string]string
+				if err := json.Unmarshal(r.Body, &body); err != nil {
+					t.Fatal(err)
+				}
+				initProvider = body["provider"]
+				authorize := "https://chat.z.ai/api/oauth/authorize?client_id=c1&state=old"
+				if body["provider"] == "bigmodel" {
+					authorize = "https://bigmodel.cn/login?appId=zcode&state=old"
+				}
+				return jsonReply(fmt.Sprintf(`{"flow_id":"0123456789abcdef0123456789abcdef","authorize_url":%q,"poll_interval_sec":2,"expires_at":%d}`, authorize, now+300)), nil
+			}}
+			metadata := map[string]any{}
+			if tc.metadata != "" {
+				metadata["site"] = tc.metadata
+			}
+			start, err := startLogin(pluginapi.AuthLoginStartRequest{Host: pluginapi.HostConfigSummary{AuthDir: t.TempDir()}, Metadata: metadata}, sender)
+			if err != nil {
+				t.Fatal(err)
+			}
+			u, err := url.Parse(start.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if u.Host != tc.wantHost || initProvider != tc.wantProvider {
+				t.Fatalf("login URL host = %q provider = %q, want host %q provider %q", u.Host, initProvider, tc.wantHost, tc.wantProvider)
+			}
+			if start.State == "" {
+				t.Fatal("missing login state")
+			}
+		})
+	}
+}
+
+func TestConfigValidatesSite(t *testing.T) {
+	t.Cleanup(func() {
+		if err := configure(nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, raw := range []string{"site: zai\n", "site: BigModel\n", "site:\n"} {
+		if err := configure([]byte(raw)); err != nil {
+			t.Fatalf("rejected %q: %v", raw, err)
+		}
+	}
+	if got := getConfig().Site; got != "auto" {
+		t.Fatalf("empty site should fall back to auto, got %q", got)
+	}
+	for _, raw := range []string{"site: z.ai\n", "site: both\n"} {
+		if err := configure([]byte(raw)); err == nil {
+			t.Fatalf("accepted invalid %q", raw)
+		}
+	}
+}
+
 func TestPollStatusClassification(t *testing.T) {
 	dir := t.TempDir()
 	key, _ := loadStateKey(dir)

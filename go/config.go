@@ -14,13 +14,14 @@ type config struct {
 	AppVersion     string `yaml:"app_version"`
 	TeamLanguage   string `yaml:"team_language"`
 	PublicBaseURL  string `yaml:"public_base_url"`
+	Site           string `yaml:"site"`
 }
 
 var configMu sync.RWMutex
 var currentConfig = defaults()
 
 func defaults() config {
-	return config{Mode: "own", MaxConcurrency: 3, AppVersion: "3.16.3", TeamLanguage: "en"}
+	return config{Mode: "own", MaxConcurrency: 3, AppVersion: "3.16.3", TeamLanguage: "en", Site: "auto"}
 }
 func getConfig() config { configMu.RLock(); defer configMu.RUnlock(); return currentConfig }
 func configure(raw []byte) error {
@@ -38,6 +39,13 @@ func configure(raw []byte) error {
 		if _, ok := httpBaseURL(c.PublicBaseURL); !ok {
 			return fmt.Errorf("invalid zcode plugin configuration: public_base_url must be an absolute HTTP(S) URL")
 		}
+	}
+	c.Site = strings.TrimSpace(strings.ToLower(c.Site))
+	if c.Site == "" {
+		c.Site = "auto"
+	}
+	if c.Site != "auto" && c.Site != "zai" && c.Site != "bigmodel" {
+		return fmt.Errorf("invalid zcode plugin configuration: site must be auto, zai or bigmodel")
 	}
 	configMu.Lock()
 	currentConfig = c

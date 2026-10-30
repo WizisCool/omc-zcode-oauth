@@ -117,7 +117,13 @@ func startLogin(req pluginapi.AuthLoginStartRequest, sender httpSender) (plugina
 	if err != nil {
 		return out, errors.New("cannot generate login bearer")
 	}
+	// A site picked in the request metadata wins, then the configured default.
+	// "auto" keeps the browser-facing chooser; a concrete site skips it so the
+	// login URL is the vendor's own authorize page.
 	site := field(req.Metadata, "site", "")
+	if site == "" && cfg.Site != "auto" {
+		site = cfg.Site
+	}
 	if site == "" {
 		flowID, err := newRandomFlowID()
 		if err != nil {
