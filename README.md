@@ -5,6 +5,11 @@
 <h1 align="center">OMC ZCode OAuth</h1>
 
 <p align="center">
+  <a href="#gh-light-mode-only"><img src="https://raw.githubusercontent.com/WizisCool/oh-my-cpa/main/web/src/assets/brand/omc-wordmark-light.svg#gh-light-mode-only" alt="Oh-My-CPA" height="22"></a>
+  <a href="#gh-dark-mode-only"><img src="https://raw.githubusercontent.com/WizisCool/oh-my-cpa/main/web/src/assets/brand/omc-wordmark-dark.svg#gh-dark-mode-only" alt="Oh-My-CPA" height="22"></a>
+</p>
+
+<p align="center">
   Native Z.ai / BigModel OAuth login for
   <a href="https://github.com/router-for-me/CLIProxyAPI">CLIProxyAPI</a>
 </p>
@@ -13,7 +18,6 @@
   <a href="https://github.com/WizisCool/omc-zcode-oauth/releases"><img src="https://img.shields.io/github/v/release/WizisCool/omc-zcode-oauth?label=release" alt="Release"></a>
   <a href="https://github.com/WizisCool/omc-zcode-oauth/actions/workflows/build.yml"><img src="https://github.com/WizisCool/omc-zcode-oauth/actions/workflows/build.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/CLIProxyAPI-v8+-4f46e5" alt="CLIProxyAPI v8+">
-  <a href="https://github.com/WizisCool/oh-my-cpa"><img src="https://img.shields.io/badge/Powered_by-Oh--My--CPA-4f46e5" alt="Powered by Oh-My-CPA"></a>
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license">
 </p>
 
