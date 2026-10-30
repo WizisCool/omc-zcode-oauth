@@ -20,6 +20,11 @@ plugins:
       max_concurrency: 3
       app_version: 3.16.3
       team_language: en
+      # auto (default) shows the Z.AI / BigModel chooser page; zai or
+      # bigmodel sends the browser straight to that vendor's authorize page.
+      site: auto
+      # Optional: absolute URL of this CPA management UI, e.g. behind NGINX.
+      # public_base_url: https://cpa.example.com
 ```
 
 Use CPA's plugin store to install `omc-zcode-oauth`, or call:
@@ -63,9 +68,49 @@ artifacts for Linux, macOS and Windows on both amd64 and arm64 are built by the
 
 ## Sign in
 
-Open CPA's Providers page and choose the ZCode sign-in tile. The plugin opens a
-site chooser with separate Z.AI and BigModel.cn entries, each using that site's
-logo. Choose the site where the subscription or gift plan belongs.
+Open CPA's Providers page and choose the ZCode sign-in tile. With the default
+`site: auto`, the plugin opens a site chooser with separate Z.AI and BigModel.cn
+entries, each using that site's logo. Choose the site where the subscription or
+gift plan belongs.
+
+Set `site: zai` or `site: bigmodel` to remove that page: the tile then returns
+the vendor's own authorize URL, so the dialog shows `chat.z.ai` or
+`bigmodel.cn` and no CPA-hosted address is involved. `site` is the first field
+of the plugin configuration form, rendered as a dropdown. Site selection order
+is the `site` query parameter, then `site` from the plugin configuration, then
+the chooser:
+
+```yaml
+plugins:
+  configs:
+    omc-zcode-oauth:
+      site: bigmodel
+```
+
+Saving the plugin configuration reconfigures the plugin in place, so switching
+sites does not need a restart. Sign-in attempts started earlier keep the site
+they were created with.
+
+The chooser link is origin-relative by default, so the browser resolves it
+against the host and path prefix that served the management UI. That covers
+direct access, public hostnames and NGINX reverse proxies; make sure the proxy
+forwards `/v0/resource/plugins/` alongside `/v0/management/` and `/v1/`. A
+configured `site` makes this link unnecessary.
+
+Set `public_base_url` when the management UI is served from a different origin,
+lives under a path prefix, or you need an absolute link that can be copied to
+another device:
+
+```yaml
+plugins:
+  configs:
+    omc-zcode-oauth:
+      public_base_url: https://cpa.example.com
+```
+
+With `https://example.com/cpa` configured, the chooser link becomes
+`https://example.com/cpa/v0/resource/plugins/omc-zcode-oauth/oauth-select`; the
+path prefix is preserved so prefixed proxies keep working.
 
 For direct or automated login, the same endpoints can skip the chooser:
 
@@ -86,13 +131,17 @@ renewed, so start a new sign-in when they expire.
 
 ## Models and routing
 
-Model names are the vendor model IDs returned by ZCode's catalogue. The plugin
-does not create `-Trial` aliases.
+Model IDs are the vendor model IDs from ZCode's catalogue, lowercased. Lowercase
+matters: ZCode echoes lowercase model names, and CPA resolves a mixed-case
+request against a lowercase registration but never the reverse, so a
+`GLM-5.3-Flash` request for a `glm-5.3-flash` model fails with `no auth
+available`. Re-read the model list after upgrading from a build that exposed
+mixed-case IDs. The plugin does not create `-Trial` aliases.
 
 A credential with a Coding Plan key uses the paid Anthropic endpoint. A
-gift-only credential, identified by an empty Coding Plan key, routes ordinary
-model names to the ZCode gift service after verifying an active, usable gift
-bucket for that model. Expired, exhausted and future-starting buckets do not
+gift-only credential, identified by an empty Coding Plan key, only lists models
+that have an active gift bucket and routes them to the ZCode gift service after
+re-verifying that bucket. Expired, exhausted and future-starting buckets do not
 pass that check, and a gift request never falls back to paid traffic.
 
 ## Quota
@@ -114,6 +163,14 @@ is unavailable. Resets stay on the vendor website.
 
 - `3008` and `3009` are retried in place with bounded delays and identical
   request bytes.
+- A stream that the vendor closes before its first payload is replayed up to two
+  times with the same request bytes, because nothing has reached the client yet.
+  Once a payload was emitted the stream is never replayed: the failure is
+  reported instead so the client never sees duplicated output.
+- Stream chunks follow the client protocol. A Messages client receives the
+  upstream SSE untouched; every other client (Chat Completions, Responses,
+  Gemini) gets exactly one `data:` event per chunk, because CPA's converters
+  only parse a chunk that starts at byte zero with `data:` and holds one event.
 - `1005`, `1113` and other quota `429` responses cool the reporting credential.
 - Aliyun WAF HTML is surfaced as a network/IP block, not an account failure.
 - `405` with `3012` or `unusual activity` is terminal for the account. The
@@ -135,8 +192,16 @@ contain the business token those endpoints require.
   replaced.
 - **No models appear:** inspect model discovery errors in CPA logs and confirm
   the credential status is active.
-- **The site chooser does not open:** verify that the plugin version is `0.1.2`
-  or newer and that CPA can reach its own `/v0/resource/plugins/` routes.
+- **The site chooser does not open:** confirm the browser can reach
+  `<your CPA base URL>/v0/resource/plugins/omc-zcode-oauth/oauth-select`. The
+  returned link is origin-relative, so a proxy that forwards only
+  `/v0/management/` or `/v1/` breaks it; also set `public_base_url` when the
+  management UI runs on a different origin or path prefix than CPA.
+- **`503 ... last upstream error: empty_stream`:** CPA benches a credential
+  after a failed upstream attempt, and with a single credential every request in
+  that cooldown window repeats the same stale message. The plugin already
+  replays an empty stream twice; if it keeps happening, wait out the cooldown and
+  check the account and gift bucket on the vendor site.
 - **Login stays pending:** complete the browser flow for the selected site.
   International and China accounts are separate; choose `Z.AI` or
   `BigModel.cn` to match the account.
