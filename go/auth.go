@@ -128,10 +128,9 @@ func startLogin(req pluginapi.AuthLoginStartRequest, sender httpSender) (plugina
 		if err != nil {
 			return out, err
 		}
-		chooser, err := loginChooserURL(req.BaseURL, state)
-		if err != nil {
-			return out, err
-		}
+		// req.BaseURL is CPA's loopback management callback, which a browser on
+		// another machine cannot reach; loginChooserURL handles that case.
+		chooser := loginChooserURL(cfg.PublicBaseURL, state)
 		return pluginapi.AuthLoginStartResponse{Provider: "zcode", URL: chooser, State: state, ExpiresAt: time.Unix(expires, 0).UTC()}, nil
 	}
 	if site != "zai" && site != "bigmodel" {

@@ -13,6 +13,7 @@ type config struct {
 	MaxConcurrency int    `yaml:"max_concurrency"`
 	AppVersion     string `yaml:"app_version"`
 	TeamLanguage   string `yaml:"team_language"`
+	PublicBaseURL  string `yaml:"public_base_url"`
 }
 
 var configMu sync.RWMutex
@@ -31,6 +32,12 @@ func configure(raw []byte) error {
 	}
 	if (c.Mode != "own" && c.Mode != "team") || (c.TeamLanguage != "zh" && c.TeamLanguage != "en") || c.MaxConcurrency < 1 || c.MaxConcurrency > 100 || strings.TrimSpace(c.AppVersion) == "" {
 		return fmt.Errorf("invalid zcode plugin configuration")
+	}
+	c.PublicBaseURL = strings.TrimSpace(c.PublicBaseURL)
+	if c.PublicBaseURL != "" {
+		if _, ok := httpBaseURL(c.PublicBaseURL); !ok {
+			return fmt.Errorf("invalid zcode plugin configuration: public_base_url must be an absolute HTTP(S) URL")
+		}
 	}
 	configMu.Lock()
 	currentConfig = c

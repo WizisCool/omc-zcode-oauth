@@ -51,6 +51,7 @@ func registration() any {
 		{Name: "max_concurrency", Type: pluginapi.ConfigFieldTypeInteger, Description: "Maximum simultaneous requests per credential (default 3)."},
 		{Name: "app_version", Type: pluginapi.ConfigFieldTypeString, Description: "ZCode client version (default 3.16.3)."},
 		{Name: "team_language", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"zh", "en"}, Description: "Team business API language (default en)."},
+		{Name: "public_base_url", Type: pluginapi.ConfigFieldTypeString, Description: "Public base URL of the CPA management UI (for example https://cpa.example.com) used for the OAuth site chooser link behind a reverse proxy (default empty: origin-relative link)."},
 	}}, "capabilities": map[string]any{"auth_provider": true, "model_provider": true, "executor": true, "executor_model_scope": "oauth", "executor_input_formats": []string{"claude"}, "executor_output_formats": []string{"claude"}, "quota_provider": true, "management_api": true}}
 }
 func handleMethod(method string, raw []byte) (any, error) {

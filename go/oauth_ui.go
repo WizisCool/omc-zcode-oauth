@@ -77,15 +77,37 @@ func clearPendingLogin(choiceID string) {
 	selectedLoginMu.Unlock()
 }
 
-func loginChooserURL(baseURL, state string) (string, error) {
-	u, err := url.Parse(strings.TrimSpace(baseURL))
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return "", errors.New("CPA management URL unavailable")
+// chooserPath is the browser-facing site chooser route registered under
+// /v0/resource/plugins/<pluginID>/.
+const chooserPath = "/v0/resource/plugins/" + pluginStoreID + "/oauth-select"
+
+// loginChooserURL builds the link CPA shows for the site chooser. CPA hands
+// plugins its loopback management callback, so any absolute link derived from it
+// is unreachable for public or reverse-proxied deployments. A configured
+// public_base_url therefore wins, and without one the link stays path-only so
+// the browser resolves it against the origin and path prefix that served the
+// management UI.
+func loginChooserURL(publicBase, state string) string {
+	query := url.Values{"state": {state}}.Encode()
+	if u, ok := httpBaseURL(publicBase); ok {
+		u.Path += chooserPath
+		u.RawQuery = query
+		return u.String()
 	}
-	u.Path = "/v0/resource/plugins/" + pluginStoreID + "/oauth-select"
-	u.RawQuery = url.Values{"state": {state}}.Encode()
-	u.Fragment = ""
-	return u.String(), nil
+	return chooserPath + "?" + query
+}
+
+// httpBaseURL parses an absolute http(s) base URL, keeping only the origin and
+// path prefix a chooser link needs.
+func httpBaseURL(raw string) (*url.URL, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, false
+	}
+	u.User = nil
+	u.Path, u.RawPath = strings.TrimSuffix(u.Path, "/"), ""
+	u.RawQuery, u.ForceQuery, u.Fragment = "", false, ""
+	return u, true
 }
 
 func beginSelectedLogin(state, site string, sender httpSender) (string, error) {
@@ -170,9 +192,12 @@ func handleOAuthResourceWithSender(req pluginapi.ManagementRequest, callbackID s
 	state := strings.TrimSpace(req.Query.Get("state"))
 	switch {
 	case strings.HasSuffix(req.Path, "/oauth-select"):
+		// The auth directory is only known after a login start or poll, so an
+		// unknown directory means this page outlived the process that made the
+		// link; treat it like any other stale link instead of leaking internals.
 		key, err := loadStateKey(currentLoginAuthDir())
 		if err != nil {
-			return pluginapi.ManagementResponse{StatusCode: http.StatusBadRequest, Headers: http.Header{"Content-Type": {"text/html; charset=utf-8"}}, Body: oauthErrorHTML(err.Error())}, nil
+			return pluginapi.ManagementResponse{StatusCode: http.StatusBadRequest, Headers: http.Header{"Content-Type": {"text/html; charset=utf-8"}}, Body: oauthErrorHTML("登录链接无效或已过期")}, nil
 		}
 		s, err := openState(key, state)
 		if err != nil || !s.Choice || time.Now().Unix() >= s.Expires {
