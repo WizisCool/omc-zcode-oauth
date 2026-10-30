@@ -4,15 +4,24 @@
     {
       "id": "omc-zcode-oauth",
       "name": "OMC ZCode OAuth",
-      "description": "Native ZCode provider for CLIProxyAPI with Z.AI/BigModel OAuth, model discovery, Anthropic Messages execution, Coding Plan and gift routes, and normalized quota.",
+      "description": "Native ZCode provider for CLIProxyAPI with Z.ai/BigModel OAuth, powered by the Oh-My-CPA ecosystem. Features dual-portal login, model discovery, Anthropic Messages execution, Coding Plan and gift routing, and normalized quota.",
       "author": "JUNZE",
       "version": "0.1.2",
       "repository": "https://github.com/WizisCool/omc-zcode-oauth",
       "logo": "https://raw.githubusercontent.com/WizisCool/omc-zcode-oauth/refs/heads/main/assets/logo.png",
       "homepage": "https://github.com/WizisCool/omc-zcode-oauth",
       "license": "MIT",
-      "tags": ["Provider", "OAuth", "Quota", "GLM", "ZCode"],
-      "install": {"type": "github-release"}
+      "tags": [
+        "Provider",
+        "OAuth",
+        "Quota",
+        "GLM",
+        "ZCode",
+        "Oh-My-CPA"
+      ],
+      "install": {
+        "type": "github-release"
+      }
     }
   ]
 }
