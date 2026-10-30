@@ -366,22 +366,62 @@ func restoreStreamLine(line []byte) []byte {
 	}
 	return append([]byte("data: "), raw...)
 }
-func forwardStream(source, target string, renamed bool, release func()) {
-	defer release()
-	defer closeHostStream(source)
+
+// emptyStreamWaits bounds the replay of a request whose upstream closed before
+// the first payload. ZCode drops those quickly, so two short waits absorb a flap
+// without hammering an account that is genuinely broken.
+var emptyStreamWaits = []time.Duration{300 * time.Millisecond, 900 * time.Millisecond}
+
+// Streaming host seams. Tests replace them to exercise retry behaviour without a
+// plugin host; the defaults are the host RPCs used in production.
+var (
+	readStreamChunk  = readHostStream
+	emitStreamChunk  = emitStream
+	openSourceStream = openUpstreamStream
+)
+
+// openUpstreamStream replays the prepared request and returns the upstream
+// stream ID, rejecting a response that is not an SSE stream.
+func openUpstreamStream(plan requestPlan, callbackID string) (string, error) {
+	var response hostStreamResponse
+	if err := hostRPC("host.http.do_stream", map[string]any{"host_callback_id": callbackID, "request": plan.HTTP}, &response); err != nil {
+		return "", errors.New("upstream stream failed")
+	}
+	if response.StreamID == "" {
+		return "", errors.New("upstream stream unavailable")
+	}
+	if response.StatusCode >= 400 || strings.Contains(strings.ToLower(response.Headers.Get("Content-Type")), "application/json") {
+		closeHostStream(response.StreamID)
+		return "", errors.New("upstream stream rejected")
+	}
+	return response.StreamID, nil
+}
+
+// pumpStream copies one upstream stream into the target and reports whether the
+// upstream ended cleanly. emitted tracks payloads the client already received so
+// a caller never replays a stream that produced output.
+func pumpStream(source, target string, renamed bool, emitted *bool) bool {
 	var held []byte
+	emit := func(payload []byte) bool {
+		if len(payload) == 0 {
+			return true
+		}
+		if emitStreamChunk(target, payload) != nil {
+			return false
+		}
+		*emitted = true
+		return true
+	}
 	for {
-		r, e := readHostStream(source)
-		if e != nil {
-			closeStream(target, "upstream stream failed")
-			return
+		r, err := readStreamChunk(source)
+		if err != nil {
+			return false
 		}
 		payload := r.Payload
 		if renamed {
 			held = append(held, payload...)
 			if len(held) > 4<<20 {
-				closeStream(target, "upstream stream frame too large")
-				return
+				return false
 			}
 			var ready []byte
 			for {
@@ -395,20 +435,48 @@ func forwardStream(source, target string, renamed bool, release func()) {
 			}
 			payload = ready
 		}
-		if len(payload) > 0 {
-			if emitStream(target, payload) != nil {
-				return
-			}
+		if !emit(payload) {
+			return false
 		}
 		if r.Done {
 			if len(held) > 0 {
-				_ = emitStream(target, restoreStreamLine(held))
+				if !emit(restoreStreamLine(held)) {
+					return false
+				}
 			}
-			closeStream(target, "")
-			return
+			return true
 		}
 	}
 }
+
+// forwardStream streams one upstream response into the target stream. Nothing is
+// emitted before the first upstream payload, so an upstream that closes empty or
+// breaks before that point is replayed with the identical request bytes; once
+// payload reached the client a failure is terminal.
+func forwardStream(source, target string, plan requestPlan, callbackID string, release func()) {
+	defer release()
+	emitted := false
+	for attempt := 0; ; attempt++ {
+		finished := pumpStream(source, target, plan.Renamed, &emitted)
+		closeHostStream(source)
+		if finished && emitted {
+			closeStream(target, "")
+			return
+		}
+		if emitted || attempt >= len(emptyStreamWaits) {
+			closeStream(target, "upstream stream closed before first payload")
+			return
+		}
+		waitFunc(emptyStreamWaits[attempt])
+		next, err := openSourceStream(plan, callbackID)
+		if err != nil {
+			closeStream(target, "upstream stream closed before first payload")
+			return
+		}
+		source = next
+	}
+}
+
 func executeStream(req pluginapi.ExecutorRequest, callbackID, streamID string, sender httpSender) (map[string]any, error) {
 	if streamID == "" {
 		return nil, pluginabi.NewError("invalid_request", "stream ID required", 400)
@@ -456,7 +524,7 @@ func executeStream(req pluginapi.ExecutorRequest, callbackID, streamID string, s
 			release()
 			return map[string]any{"headers": response.Headers, "chunks": []pluginapi.ExecutorStreamChunk{{Payload: raw}}}, nil
 		}
-		go forwardStream(response.StreamID, streamID, plan.Renamed, release)
+		go forwardStream(response.StreamID, streamID, plan, callbackID, release)
 		return map[string]any{"headers": response.Headers}, nil
 	}
 }

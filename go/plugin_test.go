@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -417,6 +418,101 @@ func TestGiftOnlyModelsListOnlyUsableBuckets(t *testing.T) {
 	}
 	if got := response.Models[0]; got.ID != "glm-5.3-flash" || got.DisplayName != "GLM-5.3-Flash" || got.ContextLength != 900000 {
 		t.Fatalf("gift-only model = %+v", got)
+	}
+}
+
+func TestStreamReplaysUpstreamClosedBeforeFirstPayload(t *testing.T) {
+	oldWait := waitFunc
+	oldRead, oldEmit, oldOpen := readStreamChunk, emitStreamChunk, openSourceStream
+	defer func() {
+		waitFunc = oldWait
+		readStreamChunk, emitStreamChunk, openSourceStream = oldRead, oldEmit, oldOpen
+	}()
+	waitFunc = func(time.Duration) {}
+
+	reads := map[string][]hostReadResponse{
+		"1": {{Done: true}},
+		"2": {{Payload: []byte("data: one\n")}, {Payload: []byte("data: two\n")}, {Done: true}},
+	}
+	var opened int
+	var emitted [][]byte
+	readStreamChunk = func(id string) (hostReadResponse, error) {
+		queue := reads[id]
+		if len(queue) == 0 {
+			t.Fatalf("unexpected read on stream %s", id)
+		}
+		reads[id] = queue[1:]
+		return queue[0], nil
+	}
+	emitStreamChunk = func(_ string, payload []byte) error {
+		emitted = append(emitted, append([]byte(nil), payload...))
+		return nil
+	}
+	openSourceStream = func(plan requestPlan, callbackID string) (string, error) {
+		opened++
+		if plan.HTTP.URL != "https://example.test/v1/messages" || callbackID != "cb" {
+			t.Fatalf("replay lost the request: %q %q", plan.HTTP.URL, callbackID)
+		}
+		return "2", nil
+	}
+	released := false
+	forwardStream("1", "target", requestPlan{HTTP: pluginapi.HTTPRequest{URL: "https://example.test/v1/messages"}}, "cb", func() { released = true })
+
+	if opened != 1 {
+		t.Fatalf("replays = %d, want 1", opened)
+	}
+	if len(emitted) != 2 || string(emitted[0]) != "data: one\n" || string(emitted[1]) != "data: two\n" {
+		t.Fatalf("emitted = %q", emitted)
+	}
+	if !released {
+		t.Fatal("credential slot was not released")
+	}
+}
+
+func TestStreamNeverReplaysAfterPayload(t *testing.T) {
+	oldRead, oldEmit, oldOpen := readStreamChunk, emitStreamChunk, openSourceStream
+	defer func() {
+		readStreamChunk, emitStreamChunk, openSourceStream = oldRead, oldEmit, oldOpen
+	}()
+	reads := 0
+	readStreamChunk = func(string) (hostReadResponse, error) {
+		reads++
+		if reads == 1 {
+			return hostReadResponse{Payload: []byte("data: one\n")}, nil
+		}
+		return hostReadResponse{}, errors.New("upstream stream failed")
+	}
+	emitStreamChunk = func(string, []byte) error { return nil }
+	openSourceStream = func(requestPlan, string) (string, error) {
+		t.Fatal("stream must not be replayed after a payload reached the client")
+		return "", nil
+	}
+	forwardStream("1", "target", requestPlan{}, "cb", func() {})
+	if reads != 2 {
+		t.Fatalf("reads = %d, want 2", reads)
+	}
+}
+
+func TestStreamGivesUpAfterBoundedEmptyReplays(t *testing.T) {
+	oldWait := waitFunc
+	oldRead, oldEmit, oldOpen := readStreamChunk, emitStreamChunk, openSourceStream
+	defer func() {
+		waitFunc = oldWait
+		readStreamChunk, emitStreamChunk, openSourceStream = oldRead, oldEmit, oldOpen
+	}()
+	waitFunc = func(time.Duration) {}
+	readStreamChunk = func(string) (hostReadResponse, error) {
+		return hostReadResponse{Done: true}, nil
+	}
+	emitStreamChunk = func(string, []byte) error { return nil }
+	opened := 0
+	openSourceStream = func(requestPlan, string) (string, error) {
+		opened++
+		return "next", nil
+	}
+	forwardStream("1", "target", requestPlan{}, "cb", func() {})
+	if opened != len(emptyStreamWaits) {
+		t.Fatalf("replays = %d, want %d", opened, len(emptyStreamWaits))
 	}
 }
 
