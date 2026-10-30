@@ -3,6 +3,8 @@ name: Build and release
 on:
   pull_request:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -17,6 +19,8 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
     defaults:
       run:
         shell: bash
@@ -26,20 +30,40 @@ jobs:
         with:
           go-version-file: go/go.mod
           cache-dependency-path: go/go.sum
+      - name: Validate release identity
+        id: metadata
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            args+=(--tag "${GITHUB_REF_NAME}")
+          fi
+          VERSION="$(python3 .github/scripts/release_metadata.py "${args[@]}")"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
+      - name: Offline release tooling tests
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
       - name: Download modules
         working-directory: go
         run: go mod download
       - name: Offline tests
         working-directory: go
         run: GOPROXY=off GOSUMDB=off go test ./...
+      - name: Offline release-linked tests
+        working-directory: go
+        run: GOPROXY=off GOSUMDB=off go test -ldflags "-X main.pluginVersion=${VERSION}" ./...
       - name: Offline vet
         working-directory: go
         run: GOPROXY=off GOSUMDB=off go vet ./...
+      - name: Default build and actual linker drift regressions
+        run: GOPROXY=off GOSUMDB=off bash .github/scripts/test-default-build.sh
 
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
     needs: test
     runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.test.outputs.version }}
     strategy:
       fail-fast: false
       matrix:
@@ -82,12 +106,11 @@ jobs:
       - name: Resolve release metadata
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-          else
-            VERSION="0.0.0-dev"
+          args=(--version "${VERSION}")
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            args+=(--tag "${GITHUB_REF_NAME}")
           fi
-          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
+          python3 .github/scripts/release_metadata.py "${args[@]}"
           echo "ARCHIVE_NAME=${PLUGIN_ID}_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" >> "${GITHUB_ENV}"
       - name: Install Zig for Windows builds
         if: matrix.goos == 'windows'
@@ -123,18 +146,24 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           set -euo pipefail
+          python3 ../.github/scripts/release_metadata.py --version "${VERSION}" --ldflags "-s -w -X main.pluginVersion=${VERSION}"
           mkdir -p ../dist
           CGO_ENABLED=1 GOPROXY=off GOSUMDB=off go build -trimpath -buildmode=c-shared \
             -ldflags "-s -w -X main.pluginVersion=${VERSION}" \
             -o "../dist/${PLUGIN_ID}.${{ matrix.ext }}" .
           rm -f "../dist/${PLUGIN_ID}.h"
+      - name: Native ABI and descriptor smoke test
+        if: matrix.goos != 'windows'
+        run: python3 .github/scripts/smoke-native.py --library "dist/${PLUGIN_ID}.${{ matrix.ext }}" --version "${VERSION}"
       - name: Package plugin
         run: |
           set -euo pipefail
           python3 .github/scripts/package-release.py \
             --library "dist/${PLUGIN_ID}.${{ matrix.ext }}" \
             --archive "${ARCHIVE_NAME}" \
-            --checksum "${ARCHIVE_NAME}.sha256"
+            --checksum "${ARCHIVE_NAME}.sha256" \
+            --descriptor "${PLUGIN_ID}.omc.json" \
+            --version "${VERSION}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARCHIVE_NAME }}
@@ -142,32 +171,44 @@ jobs:
             ${{ env.ARCHIVE_NAME }}
             ${{ env.ARCHIVE_NAME }}.sha256
           if-no-files-found: error
+      - name: Upload public plugin declaration
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-declaration
+          path: |
+            ${{ env.PLUGIN_ID }}.omc.json
+            ${{ env.PLUGIN_ID }}.omc.json.sha256
+          if-no-files-found: error
 
   release:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-24.04
+    concurrency:
+      group: plugin-release-${{ github.ref }}
+      cancel-in-progress: false
     defaults:
       run:
         shell: bash
     steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go/go.mod
+          cache: false
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      - name: Verify release assets before publishing
+        run: python3 .github/scripts/release_metadata.py --tag "${GITHUB_REF_NAME}" --distribution dist
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          sort dist/*.sha256 > dist/checksums.txt
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" dist/*.zip dist/checksums.txt --clobber
-          else
-            gh release create "${GITHUB_REF_NAME}" \
-              dist/*.zip dist/checksums.txt \
-              --title "${GITHUB_REF_NAME}" \
-              --generate-notes
-          fi
+          python3 .github/scripts/publish_release.py --tag "${GITHUB_REF_NAME}" \
+            --repository "${GITHUB_REPOSITORY}" --distribution dist

@@ -3,7 +3,16 @@
 ## Requirements
 
 - CLIProxyAPI v8 with dynamic plugin support and the quota provider.
+- A CPA build that accepts the plugin's declared ABI and RPC schema: the plugin
+  registers ABI 1 and schema 6 from its pinned SDK, and an older host refuses it at
+  registration with `plugin schema version 6 is not supported`.
 - Go 1.27.1 for local development. Release builds are produced by CI.
+
+The dynamic dependencies observed in the v0.1.3 archives set that release's floor: the
+linux/amd64 and linux/arm64 libraries resolve no symbol newer than glibc 2.34, both
+macOS libraries declare a minimum of macOS 15.0, and the windows/amd64 library links the
+Universal CRT. That is an observation about those artifacts, not an ABI guarantee or a
+claim about other architectures and later releases; check the archive you install.
 
 ## Install from the plugin store
 
@@ -33,22 +42,50 @@ Use CPA's plugin store to install `omc-zcode-oauth`, or call:
 POST /v0/management/plugin-store/omc-zcode-oauth/install
 ```
 
-A specific tagged release can be selected with `?version=0.1.2`. The release
-archive is installed under `<plugins-dir>/<os>/<arch>/` as
-`omc-zcode-oauth.so`, `omc-zcode-oauth.dylib`, or `omc-zcode-oauth.dll`, depending
-on the target platform. Restart CPA if it reports that the loaded plugin must be
-replaced.
+A specific tagged release can be selected with `?version=0.1.4`, the pending release.
+The archive contains one library file and is installed under
+`<plugins-dir>/<os>/<arch>/` as `omc-zcode-oauth-v<version>.so`, `.dylib` or `.dll`,
+depending on the target platform: the installed version is part of the file name. CPA
+also loads a hand-placed unversioned `omc-zcode-oauth.so`; that file carries no version,
+so a pinned version in `plugins.configs` does not match it. The release publishes
+`checksums.txt` covering every archive. Restart CPA if it reports that the loaded plugin
+must be replaced.
 
-Manual layout:
+Manual layout, for the version you install:
 
 ```text
-<plugins-dir>/linux/amd64/omc-zcode-oauth.so
-<plugins-dir>/linux/arm64/omc-zcode-oauth.so
-<plugins-dir>/darwin/amd64/omc-zcode-oauth.dylib
-<plugins-dir>/darwin/arm64/omc-zcode-oauth.dylib
-<plugins-dir>/windows/amd64/omc-zcode-oauth.dll
-<plugins-dir>/windows/arm64/omc-zcode-oauth.dll
+<plugins-dir>/linux/amd64/omc-zcode-oauth-v<version>.so
+<plugins-dir>/linux/arm64/omc-zcode-oauth-v<version>.so
+<plugins-dir>/darwin/amd64/omc-zcode-oauth-v<version>.dylib
+<plugins-dir>/darwin/arm64/omc-zcode-oauth-v<version>.dylib
+<plugins-dir>/windows/amd64/omc-zcode-oauth-v<version>.dll
+<plugins-dir>/windows/arm64/omc-zcode-oauth-v<version>.dll
 ```
+
+## Description declaration
+
+Releases from 0.1.4 publish an optional `<plugin_id>.omc.json` (`schema_version` 1)
+with localized descriptions. A release that does not carry the file — including 0.1.3
+— leaves readers on the description from `registry.json`.
+
+When a release carries the file, the plugin serves the same bytes at
+`/v0/resource/plugins/omc-zcode-oauth/omc.json`. The parts that matter here:
+
+- `plugin_id` is `omc-zcode-oauth`, and `plugin_version` is the release version
+  without a leading `v`. A document naming another id or version is ignored, not
+  guessed at.
+- `i18n.description` may contain any subset of `zh`, `en`, `zh-Hant` and `ms`; each
+  value is plain text.
+- It declares no menu, settings label or action, and it never changes the plugin name,
+  logo or the description CPA's store already shows.
+- CPA serves plugin resources without management authentication, and answers 404 for
+  them in Home mode. When the resource is unavailable, a reader uses the release asset;
+  when neither exists, the CPA description is the result.
+
+The served body is never re-serialized: the plugin embeds the same file that packaging
+copies into the release, so served and published bytes are comparable by hash. Bump the
+file together with `registry.json`. The archive itself keeps its layout of one library
+file at the root.
 
 ## Build locally
 
@@ -58,8 +95,8 @@ go mod download
 GOPROXY=off GOSUMDB=off go test ./...
 GOPROXY=off GOSUMDB=off go vet ./...
 cd ..
-make build VERSION=0.1.2
-make package VERSION=0.1.2
+make build VERSION=0.1.4
+make package VERSION=0.1.4
 ```
 
 `make build` uses the current machine's OS and architecture. Official release

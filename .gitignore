@@ -14,3 +14,4 @@ token*.json
 credentials*.json
 secrets/
 .zcode-oauth-state.key
+__pycache__/

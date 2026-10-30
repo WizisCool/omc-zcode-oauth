@@ -8,7 +8,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
-var pluginVersion = "0.0.0-dev"
+var pluginVersion = "0.1.4"
 
 type rpcAuthStart struct {
 	pluginapi.AuthLoginStartRequest
@@ -109,13 +109,14 @@ func handleMethod(method string, raw []byte) (any, error) {
 			{"path": "/oauth-start", "menu": "", "description": "Start the selected ZCode site sign-in."},
 			{"path": "/zai.png", "menu": "", "description": "Z.AI sign-in logo."},
 			{"path": "/bigmodel.png", "menu": "", "description": "BigModel sign-in logo."},
+			{"path": "/omc.json", "menu": "", "description": "Public, optional OMC plugin declaration."},
 		}}, nil
 	case "management.handle":
 		var r rpcManagement
 		if err := unmarshal(raw, &r); err != nil {
 			return nil, err
 		}
-		return handleOAuthResource(r.ManagementRequest, r.CallbackID)
+		return handleManagementResource(r.ManagementRequest, r.CallbackID)
 	case "model.static":
 		return pluginapi.ModelResponse{Provider: "zcode"}, nil
 	case "model.for_auth":
