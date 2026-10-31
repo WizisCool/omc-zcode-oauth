@@ -104,7 +104,10 @@ func startLogin(req pluginapi.AuthLoginStartRequest, sender httpSender) (plugina
 	if req.Host.AuthDir == "" {
 		return out, errors.New("CPA auth directory unavailable")
 	}
-	setLoginAuthDir(req.Host.AuthDir)
+	site, err := loginSite(req.Metadata, cfg.Site)
+	if err != nil {
+		return out, err
+	}
 	key, err := loadStateKey(req.Host.AuthDir)
 	if err != nil {
 		return out, err
@@ -117,31 +120,6 @@ func startLogin(req pluginapi.AuthLoginStartRequest, sender httpSender) (plugina
 	if err != nil {
 		return out, errors.New("cannot generate login bearer")
 	}
-	// A site picked in the request metadata wins, then the configured default.
-	// "auto" keeps the browser-facing chooser; a concrete site skips it so the
-	// login URL is the vendor's own authorize page.
-	site := field(req.Metadata, "site", "")
-	if site == "" && cfg.Site != "auto" {
-		site = cfg.Site
-	}
-	if site == "" {
-		flowID, err := newRandomFlowID()
-		if err != nil {
-			return out, errors.New("cannot generate login state")
-		}
-		expires := time.Now().Add(10 * time.Minute).Unix()
-		state, err := sealState(key, loginState{FlowID: flowID, Mode: mode, Expires: expires, Nonce: nonce, Bearer: bearerBytes, Choice: true})
-		if err != nil {
-			return out, err
-		}
-		// req.BaseURL is CPA's loopback management callback, which a browser on
-		// another machine cannot reach; loginChooserURL handles that case.
-		chooser := loginChooserURL(cfg.PublicBaseURL, state)
-		return pluginapi.AuthLoginStartResponse{Provider: "zcode", URL: chooser, State: state, ExpiresAt: time.Unix(expires, 0).UTC()}, nil
-	}
-	if site != "zai" && site != "bigmodel" {
-		return out, errors.New("invalid login site")
-	}
 	flow, err := beginVendorFlow(sender, site, cfg.AppVersion, bearerBytes)
 	if err != nil {
 		return out, err
@@ -153,12 +131,29 @@ func startLogin(req pluginapi.AuthLoginStartRequest, sender httpSender) (plugina
 	return pluginapi.AuthLoginStartResponse{Provider: "zcode", URL: flow.URL, State: state, ExpiresAt: time.Unix(flow.Expires, 0).UTC()}, nil
 }
 
+// loginSite resolves only an explicit site. The native host forwards authenticated
+// login query parameters into Metadata; an invalid override must never fall back.
+func loginSite(metadata map[string]any, configured string) (string, error) {
+	site := configured
+	if raw, present := metadata["site"]; present {
+		value, ok := raw.(string)
+		if !ok {
+			return "", errors.New("invalid login site: use zai or bigmodel")
+		}
+		site = strings.TrimSpace(value)
+	}
+	if site == "" || site == "auto" {
+		return "", errors.New("choose a ZCode site: set site to zai or bigmodel in the native plugin configuration, or pass site=zai or site=bigmodel to the authenticated login request")
+	}
+	if site != "zai" && site != "bigmodel" {
+		return "", errors.New("invalid login site: use zai or bigmodel")
+	}
+	return site, nil
+}
+
 func pollLogin(req pluginapi.AuthLoginPollRequest, sender httpSender) (pluginapi.AuthLoginPollResponse, error) {
 	pending := pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusPending}
-	if req.Host.AuthDir != "" {
-		setLoginAuthDir(req.Host.AuthDir)
-	}
-	key, err := loadStateKey(currentLoginAuthDir())
+	key, err := loadStateKey(req.Host.AuthDir)
 	if err != nil {
 		return pending, err
 	}
@@ -166,30 +161,13 @@ func pollLogin(req pluginapi.AuthLoginPollRequest, sender httpSender) (pluginapi
 	if err != nil {
 		return pending, err
 	}
-	choiceID := s.FlowID
 	if s.Choice {
-		selected, ok := pendingLogin(choiceID)
-		if !ok {
-			if time.Now().Unix() >= s.Expires {
-				return pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusError, Message: "ZCode sign-in expired; sign in again"}, nil
-			}
-			return pending, nil
-		}
-		s = loginState{FlowID: selected.FlowID, Site: selected.Site, Mode: selected.Mode, Expires: selected.Expires, Interval: selected.Interval, Bearer: selected.Bearer}
+		return pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusError, Message: "ZCode site selection expired; choose zai or bigmodel and start sign-in again"}, nil
 	}
 	if time.Now().Unix() >= s.Expires {
 		return pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusError, Message: "ZCode sign-in expired; sign in again"}, nil
 	}
-	response, err := pollVendorFlow(s, sender)
-	if err != nil {
-		return pending, err
-	}
-	if s.Choice || choiceID != "" {
-		if response.Status != pluginapi.AuthLoginStatusPending {
-			clearPendingLogin(choiceID)
-		}
-	}
-	return response, nil
+	return pollVendorFlow(s, sender)
 }
 
 func pollVendorFlow(s loginState, sender httpSender) (pluginapi.AuthLoginPollResponse, error) {
@@ -275,14 +253,6 @@ func newRandomBytes(n int) ([]byte, error) {
 	b := make([]byte, n)
 	_, err := io.ReadFull(rand.Reader, b)
 	return b, err
-}
-
-func newRandomFlowID() (string, error) {
-	b, err := newRandomBytes(16)
-	if err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
 }
 
 func rawString(v json.RawMessage) string {

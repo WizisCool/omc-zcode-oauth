@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -51,4 +52,17 @@ func configure(raw []byte) error {
 	currentConfig = c
 	configMu.Unlock()
 	return nil
+}
+
+// httpBaseURL validates the legacy public_base_url setting. It is not used to
+// construct OAuth links or expose any management action as a public resource.
+func httpBaseURL(raw string) (*url.URL, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, false
+	}
+	u.User = nil
+	u.Path, u.RawPath = strings.TrimSuffix(u.Path, "/"), ""
+	u.RawQuery, u.ForceQuery, u.Fragment = "", false, ""
+	return u, true
 }

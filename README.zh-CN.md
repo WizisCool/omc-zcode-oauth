@@ -38,6 +38,9 @@ Oh-My-CPA 是 CLIProxyAPI 的自托管控制面板与用量观测台。
 
 ## 两个站点，一个 provider
 
+> v0.1.5 已修复 Issue #1，移除公共动态 OAuth 资源。v0.1.3/v0.1.4 仍受影响，
+> 对外开放前请先升级并阅读 [安全说明](docs/USAGE.md)。
+
 ZCode 账号有两个登录入口。两者产生同一种凭证；可以每次登录时选择站点，也可以在
 配置中固定。
 
@@ -46,24 +49,24 @@ ZCode 账号有两个登录入口。两者产生同一种凭证；可以每次�
 | Z.ai | `zai` | `https://chat.z.ai/api/oauth/authorize` |
 | BigModel.cn | `bigmodel` | `https://bigmodel.cn/login?appId=zcode` |
 
-- `site: auto`（默认）：OAuth 卡片打开应用内选择页，列出两个站点。
+- `site: auto`（默认）：必须在受认证的原生登录请求中明确提供 `site=zai` 或
+  `site=bigmodel`，不再打开浏览器选择页。
 - `site: zai` / `site: bigmodel`：OAuth 卡片直接跳转对应站点的授权页。
-- 请求级 `?site=` 参数可对单次登录覆盖已配置的站点。
+- 受认证请求的 `?site=` 参数可对单次登录覆盖配置；无效值直接拒绝，不会回退。
 
 ## 面板无关
 
-所有面向用户的部分都由宿主渲染：OAuth 卡片、配置字段、资源页面和配额视图都通过
+所有面向用户的部分都由宿主渲染：OAuth 卡片、配置字段、静态资源和配额视图都通过
 CPA 的插件 ABI 与管理 API 呈现。插件在 [Oh-My-CPA](https://github.com/WizisCool/oh-my-cpa)
 中是一等公民，在 CPA 自带的 Management Center 或任何对接 CPA 管理 API 的面板中
 表现一致。
 
-选择页链接默认使用相对路径，因此无论 CPA 通过 `127.0.0.1`、公网域名还是反向代理
-访问，登录都能正常工作。需要绝对链接时（管理 UI 在不同源、带路径前缀，或需要可
-复制的跨设备链接），配置 `public_base_url` 即可。
+OAuth 发起和轮询使用 CPA 原生受认证管理 API，公共插件资源仅提供静态 Logo 与可选
+描述声明。`public_base_url` 为兼容旧配置保留并继续校验，但不再影响登录流程。
 
 ## 功能
 
-- Z.ai 与 BigModel OAuth，支持应用内选择页或固定站点。
+- Z.ai 与 BigModel OAuth，通过原生受认证入口明确选择站点。
 - 个人 Coding Plan、团队席位与纯礼包凭证。
 - 基于 ZCode 客户端目录的模型发现。
 - 纯礼包凭证将普通厂商模型名路由到礼包服务。
@@ -103,7 +106,7 @@ plugins:
 | `max_concurrency` | 整数 | `3` | 每凭证 1–100 个并发请求 |
 | `app_version` | 字符串 | `3.16.3` | ZCode 客户端版本 |
 | `team_language` | 枚举 | `en` | `zh`、`en` |
-| `public_base_url` | 字符串 | 空 | CPA 管理 UI 的绝对地址，如 `https://cpa.example.com` 或 `https://example.com/cpa` |
+| `public_base_url` | 字符串 | 空 | 兼容旧配置的 URL，仍校验但不用于原生 OAuth |
 
 ## 开发
 

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -68,7 +67,7 @@ func TestOMCDescriptorMatchesBuildAndRegistry(t *testing.T) {
 	}
 }
 
-func TestOMCResourceRegistrationPreservesNativeRoutes(t *testing.T) {
+func TestOMCResourceRegistrationIsStaticOnly(t *testing.T) {
 	value, err := handleMethod("management.register", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -81,10 +80,10 @@ func TestOMCResourceRegistrationPreservesNativeRoutes(t *testing.T) {
 	if err := json.Unmarshal(raw, &registration); err != nil {
 		t.Fatal(err)
 	}
-	if len(registration.Routes) != 0 || len(registration.Resources) != 5 {
-		t.Fatal("expected four existing resources and one optional declaration")
+	if len(registration.Routes) != 0 || len(registration.Resources) != 3 {
+		t.Fatal("expected two static logos and one optional declaration")
 	}
-	want := []string{"/oauth-select", "/oauth-start", "/zai.png", "/bigmodel.png", "/omc.json"}
+	want := []string{"/zai.png", "/bigmodel.png", "/omc.json"}
 	for i, route := range registration.Resources {
 		if route.Path != want[i] || route.Menu != "" {
 			t.Errorf("resource %d path=%q menu=%q, want %q with no menu", i, route.Path, route.Menu, want[i])
@@ -121,7 +120,7 @@ func TestOMCResourceReturnsOnlyBuildBoundPublicBytes(t *testing.T) {
 		}
 		// Response buffers cannot be used to corrupt subsequent public responses.
 		response.Body[0] = '!'
-		again, err := handleManagementResource(req, "")
+		again, err := handleManagementResource(req)
 		if err != nil || string(again.Body) != omcDescriptorJSON {
 			t.Fatal("resource response mutated the embedded document")
 		}
@@ -137,27 +136,16 @@ func TestOMCResourceRequiresExactPathAndGET(t *testing.T) {
 		"/v0/management/plugins/" + pluginStoreID + "/omc.json",
 	} {
 		t.Run(path, func(t *testing.T) {
-			response, err := handleManagementResource(pluginapi.ManagementRequest{Method: http.MethodGet, Path: path}, "")
+			response, err := handleManagementResource(pluginapi.ManagementRequest{Method: http.MethodGet, Path: path})
 			if err != nil || response.StatusCode != http.StatusNotFound {
 				t.Fatalf("path %q: response=%+v err=%v", path, response, err)
 			}
 		})
 	}
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch, http.MethodHead, http.MethodOptions, "get", ""} {
-		response, err := handleManagementResource(pluginapi.ManagementRequest{Method: method, Path: omcResourcePath}, "")
+		response, err := handleManagementResource(pluginapi.ManagementRequest{Method: method, Path: omcResourcePath})
 		if err != nil || response.StatusCode != http.StatusMethodNotAllowed || response.Headers.Get("Allow") != http.MethodGet {
 			t.Errorf("method %q: response=%+v err=%v", method, response, err)
-		}
-	}
-}
-
-func TestOptionalOMCResourceDoesNotChangeOAuthResources(t *testing.T) {
-	for _, path := range []string{"oauth-select", "oauth-start", "zai.png", "bigmodel.png"} {
-		req := pluginapi.ManagementRequest{Method: http.MethodGet, Path: "/v0/resource/plugins/" + pluginStoreID + "/" + path}
-		before, beforeErr := handleOAuthResource(req, "")
-		after, afterErr := handleManagementResource(req, "")
-		if beforeErr != afterErr || !reflect.DeepEqual(before, after) {
-			t.Errorf("native resource %q changed after adding optional OMC discovery", path)
 		}
 	}
 }

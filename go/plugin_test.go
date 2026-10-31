@@ -138,121 +138,6 @@ func TestStartAndPollOAuth(t *testing.T) {
 		t.Fatalf("poll status %q err %v", poll.Status, err)
 	}
 }
-func TestOAuthSiteChooserStartsSelectedSite(t *testing.T) {
-	now := time.Now().Unix()
-	var initCalls int
-	var initProvider, initBearer, initDevice string
-	sender := &fakeSender{reply: func(r pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
-		switch {
-		case strings.HasSuffix(r.URL, "/oauth/cli/init"):
-			initCalls++
-			initBearer = r.Headers.Get("Authorization")
-			initDevice = r.Headers.Get("X-Device-Mid")
-			var body map[string]string
-			if err := json.Unmarshal(r.Body, &body); err != nil {
-				t.Fatal(err)
-			}
-			initProvider = body["provider"]
-			return jsonReply(fmt.Sprintf(`{"flow_id":"0123456789abcdef0123456789abcdef","authorize_url":"https://bigmodel.cn/login?state=old","poll_interval_sec":2,"expires_at":%d}`, now+300)), nil
-		case strings.Contains(r.URL, "/oauth/cli/poll/"):
-			if r.Headers.Get("Authorization") != initBearer || r.Headers.Get("X-Device-Mid") != initDevice {
-				t.Error("poll identity changed")
-			}
-			return jsonReply(`{"status":"pending"}`), nil
-		default:
-			t.Fatalf("unexpected URL %s", r.URL)
-			return pluginapi.HTTPResponse{}, nil
-		}
-	}}
-	dir := t.TempDir()
-	start, err := startLogin(pluginapi.AuthLoginStartRequest{BaseURL: "http://127.0.0.1:8317/v0/management/oauth-callback", Host: pluginapi.HostConfigSummary{AuthDir: dir}}, sender)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if initCalls != 0 {
-		t.Fatal("site chooser contacted the vendor before a site was selected")
-	}
-	u, err := url.Parse(start.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if u.IsAbs() || u.Host != "" || u.Path != chooserPath || u.Query().Get("state") != start.State {
-		t.Fatalf("wrong chooser URL %s", start.URL)
-	}
-	page, err := handleOAuthResource(pluginapi.ManagementRequest{Method: http.MethodGet, Path: u.Path, Query: u.Query()}, "")
-	if err != nil || page.StatusCode != http.StatusOK || !bytes.Contains(page.Body, []byte("Z.AI")) || !bytes.Contains(page.Body, []byte("BigModel.cn")) {
-		t.Fatalf("bad chooser page status=%d err=%v", page.StatusCode, err)
-	}
-	for _, site := range []string{"zai", "bigmodel"} {
-		if !bytes.Contains(page.Body, []byte(`href="oauth-start?site=`+site+`&amp;state=`)) {
-			t.Fatalf("chooser link for %s is not origin-relative", site)
-		}
-	}
-	logo, err := handleOAuthResource(pluginapi.ManagementRequest{Method: http.MethodGet, Path: "/v0/resource/plugins/omc-zcode-oauth/bigmodel.png"}, "")
-	if err != nil || logo.StatusCode != http.StatusOK || logo.Headers.Get("Content-Type") != "image/png" || !bytes.Equal(logo.Body, bigModelLogoPNG) {
-		t.Fatal("BigModel logo resource unavailable")
-	}
-	redirect, err := handleOAuthResourceWithSender(pluginapi.ManagementRequest{Method: http.MethodGet, Path: "/v0/resource/plugins/omc-zcode-oauth/oauth-start", Query: url.Values{"state": {start.State}, "site": {"bigmodel"}}}, "", sender)
-	if err != nil || redirect.StatusCode != http.StatusFound {
-		t.Fatalf("start selected site status=%d err=%v body=%s", redirect.StatusCode, err, redirect.Body)
-	}
-	loginURL, err := url.Parse(redirect.Headers.Get("Location"))
-	if err != nil || loginURL.Host != "bigmodel.cn" {
-		t.Fatalf("wrong selected login URL")
-	}
-	if initCalls != 1 || initProvider != "bigmodel" {
-		t.Fatalf("init calls=%d provider=%q", initCalls, initProvider)
-	}
-	poll, err := pollLogin(pluginapi.AuthLoginPollRequest{Host: pluginapi.HostConfigSummary{AuthDir: dir}, State: start.State}, sender)
-	if err != nil || poll.Status != pluginapi.AuthLoginStatusPending {
-		t.Fatalf("poll status=%q err=%v", poll.Status, err)
-	}
-}
-
-func TestStartLoginUsesConfiguredPublicBase(t *testing.T) {
-	t.Cleanup(func() {
-		if err := configure(nil); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if err := configure([]byte("public_base_url: https://cpa.example.com\n")); err != nil {
-		t.Fatal(err)
-	}
-	sender := &fakeSender{reply: func(pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
-		t.Fatal("the site chooser contacted the vendor before a site was selected")
-		return pluginapi.HTTPResponse{}, nil
-	}}
-	start, err := startLogin(pluginapi.AuthLoginStartRequest{Host: pluginapi.HostConfigSummary{AuthDir: t.TempDir()}}, sender)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "https://cpa.example.com" + chooserPath + "?state=" + url.QueryEscape(start.State)
-	if start.URL != want {
-		t.Fatalf("start URL = %q, want %q", start.URL, want)
-	}
-}
-
-func TestChooserURLIsReachableThroughProxy(t *testing.T) {
-	const state = "state-token"
-	const relative = "/v0/resource/plugins/omc-zcode-oauth/oauth-select?state=state-token"
-	for _, tc := range []struct {
-		name   string
-		public string
-		want   string
-	}{
-		{"no public base stays origin-relative", "", relative},
-		{"public base URL wins", "https://cpa.example.com", "https://cpa.example.com" + relative},
-		{"public base URL keeps its path prefix", "https://example.com/cpa/", "https://example.com/cpa" + relative},
-		{"invalid public base falls back", "cpa.example.com", relative},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := loginChooserURL(tc.public, state); got != tc.want {
-				t.Fatalf("chooser URL = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestConfigValidatesPublicBaseURL(t *testing.T) {
 	t.Cleanup(func() {
 		if err := configure(nil); err != nil {
@@ -272,7 +157,7 @@ func TestConfigValidatesPublicBaseURL(t *testing.T) {
 	}
 }
 
-func TestConfiguredSiteSkipsLocalChooser(t *testing.T) {
+func TestNativeLoginSitePrecedence(t *testing.T) {
 	t.Cleanup(func() {
 		if err := configure(nil); err != nil {
 			t.Fatal(err)

@@ -40,6 +40,9 @@ control plane and usage console for CLIProxyAPI.
 
 ## Two portals, one provider
 
+> v0.1.5 fixes Issue #1 by removing the dynamic public OAuth resources. v0.1.3 and
+> v0.1.4 remain affected; upgrade before exposing either older build.
+
 ZCode accounts can sign in through two portals. Both produce the same
 credential; pick a site per login, or fix the choice in config.
 
@@ -48,28 +51,28 @@ credential; pick a site per login, or fix the choice in config.
 | Z.ai | `zai` | `https://chat.z.ai/api/oauth/authorize` |
 | BigModel.cn | `bigmodel` | `https://bigmodel.cn/login?appId=zcode` |
 
-- `site: auto` (default): the OAuth tile opens an in-app chooser listing both sites.
+- `site: auto` (default): requires an explicit `site=zai` or `site=bigmodel` in
+  the authenticated native login request; it does not open a browser chooser.
 - `site: zai` / `site: bigmodel`: the OAuth tile opens that vendor's authorize
   page directly.
 - A request-scoped `?site=` parameter overrides the configured site for a
-  single login.
+  single authenticated login. Invalid overrides are rejected.
 
 ## Panel-agnostic by design
 
 Everything user-facing is rendered by the host: the OAuth tile, config fields,
-resource pages and quota views all go through CPA's plugin ABI and management
+static assets and quota views all go through CPA's plugin ABI and management
 API. The plugin is first-class in [Oh-My-CPA](https://github.com/WizisCool/oh-my-cpa)
 and works the same in CPA's own Management Center or any other panel that speaks
 CPA's management API.
 
-Chooser links are origin-relative, so login works whether CPA is reached on
-`127.0.0.1`, a public hostname or a reverse proxy. Set `public_base_url` when
-you need an absolute link — a different origin for the management UI, a path
-prefix, or a copyable cross-device URL.
+OAuth starts and polling use CPA's authenticated management API. Public plugin
+resources contain only static logos and the optional description declaration.
+`public_base_url` is a legacy compatibility setting and no longer affects login.
 
 ## Features
 
-- Z.ai and BigModel OAuth with an in-app chooser or a fixed site.
+- Z.ai and BigModel OAuth through native authenticated login with an explicit site.
 - Personal Coding Plan, team-seat and gift-only credentials.
 - Model discovery from ZCode's client catalogue.
 - Gift-only credentials route ordinary vendor model names through the gift service.
@@ -112,7 +115,7 @@ Releases are created by GitHub Actions whenever a `v*` tag is pushed.
 | `max_concurrency` | integer | `3` | 1–100 requests per credential |
 | `app_version` | string | `3.16.3` | ZCode client version |
 | `team_language` | enum | `en` | `zh`, `en` |
-| `public_base_url` | string | empty | Absolute URL of the CPA management UI, e.g. `https://cpa.example.com` or `https://example.com/cpa` |
+| `public_base_url` | string | empty | Legacy URL, accepted and validated for compatibility; unused by native OAuth |
 
 ## Development
 

@@ -8,7 +8,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
-var pluginVersion = "0.1.4"
+var pluginVersion = "0.1.5"
 
 type rpcAuthStart struct {
 	pluginapi.AuthLoginStartRequest
@@ -47,12 +47,12 @@ func unmarshal(raw []byte, out any) error {
 }
 func registration() any {
 	return map[string]any{"schema_version": pluginabi.SchemaVersion, "metadata": pluginapi.Metadata{Name: "OMC ZCode OAuth", Version: pluginVersion, Author: "JUNZE", GitHubRepository: "https://github.com/WizisCool/omc-zcode-oauth", Logo: "https://raw.githubusercontent.com/WizisCool/omc-zcode-oauth/refs/heads/main/assets/logo.png", ConfigFields: []pluginapi.ConfigField{
-		{Name: "site", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"zai", "bigmodel", "auto"}, Description: "ZCode site to sign in. zai and bigmodel send the browser straight to that vendor's authorize page; auto shows the Z.AI/BigModel chooser page instead (default auto)."},
+		{Name: "site", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"zai", "bigmodel", "auto"}, Description: "ZCode sign-in site: zai or bigmodel. auto requires an explicit site in the authenticated login request; no public chooser is provided (default auto)."},
 		{Name: "mode", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"own", "team"}, Description: "Default OAuth plan selection (default own)."},
 		{Name: "max_concurrency", Type: pluginapi.ConfigFieldTypeInteger, Description: "Maximum simultaneous requests per credential (default 3)."},
 		{Name: "app_version", Type: pluginapi.ConfigFieldTypeString, Description: "ZCode client version (default 3.16.3)."},
 		{Name: "team_language", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"zh", "en"}, Description: "Team business API language (default en)."},
-		{Name: "public_base_url", Type: pluginapi.ConfigFieldTypeString, Description: "Public base URL of the CPA management UI (for example https://cpa.example.com) used for the OAuth site chooser link behind a reverse proxy (default empty: origin-relative link)."},
+		{Name: "public_base_url", Type: pluginapi.ConfigFieldTypeString, Description: "Legacy public base URL, retained for configuration compatibility. Native OAuth login uses the vendor URL and does not use this setting (default empty)."},
 	}}, "capabilities": map[string]any{"auth_provider": true, "model_provider": true, "executor": true, "executor_model_scope": "oauth", "executor_input_formats": []string{"claude"}, "executor_output_formats": []string{"claude"}, "quota_provider": true, "management_api": true}}
 }
 func handleMethod(method string, raw []byte) (any, error) {
@@ -105,8 +105,6 @@ func handleMethod(method string, raw []byte) (any, error) {
 		return nil, pluginabi.NewError("reauth_required", "ZCode sessions cannot be refreshed; sign in again", 400)
 	case "management.register":
 		return map[string]any{"resources": []map[string]any{
-			{"path": "/oauth-select", "menu": "", "description": "Choose Z.AI or BigModel.cn before sign-in."},
-			{"path": "/oauth-start", "menu": "", "description": "Start the selected ZCode site sign-in."},
 			{"path": "/zai.png", "menu": "", "description": "Z.AI sign-in logo."},
 			{"path": "/bigmodel.png", "menu": "", "description": "BigModel sign-in logo."},
 			{"path": "/omc.json", "menu": "", "description": "Public, optional OMC plugin declaration."},
@@ -116,7 +114,7 @@ func handleMethod(method string, raw []byte) (any, error) {
 		if err := unmarshal(raw, &r); err != nil {
 			return nil, err
 		}
-		return handleManagementResource(r.ManagementRequest, r.CallbackID)
+		return handleManagementResource(r.ManagementRequest)
 	case "model.static":
 		return pluginapi.ModelResponse{Provider: "zcode"}, nil
 	case "model.for_auth":

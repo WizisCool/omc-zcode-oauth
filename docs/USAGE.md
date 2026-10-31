@@ -1,5 +1,9 @@
 # Usage
 
+> **Security fix (Issue #1):** v0.1.5 removes the dynamic public OAuth resources.
+> v0.1.3 and v0.1.4 still expose them. Upgrade before using either older release;
+> selecting a fixed site alone does not remove those routes.
+
 ## Requirements
 
 - CLIProxyAPI v8 with dynamic plugin support and the quota provider.
@@ -29,10 +33,10 @@ plugins:
       max_concurrency: 3
       app_version: 3.16.3
       team_language: en
-      # auto (default) shows the Z.AI / BigModel chooser page; zai or
-      # bigmodel sends the browser straight to that vendor's authorize page.
-      site: auto
-      # Optional: absolute URL of this CPA management UI, e.g. behind NGINX.
+      # Choose zai or bigmodel for the native OAuth tile. auto (default)
+      # requires an explicit site in the authenticated auth-url request.
+      site: zai
+      # Legacy setting accepted for compatibility; no longer used for OAuth.
       # public_base_url: https://cpa.example.com
 ```
 
@@ -42,7 +46,7 @@ Use CPA's plugin store to install `omc-zcode-oauth`, or call:
 POST /v0/management/plugin-store/omc-zcode-oauth/install
 ```
 
-Select release `0.1.4` with `?version=0.1.4`.
+Select release `0.1.5` with `?version=0.1.5`.
 The archive contains one library file and is installed under
 `<plugins-dir>/<os>/<arch>/` as `omc-zcode-oauth-v<version>.so`, `.dylib` or `.dll`,
 depending on the target platform: the installed version is part of the file name. CPA
@@ -95,8 +99,8 @@ go mod download
 GOPROXY=off GOSUMDB=off go test ./...
 GOPROXY=off GOSUMDB=off go vet ./...
 cd ..
-make build VERSION=0.1.4
-make package VERSION=0.1.4
+make build VERSION=0.1.5
+make package VERSION=0.1.5
 ```
 
 `make build` uses the current machine's OS and architecture. Official release
@@ -105,17 +109,9 @@ artifacts for Linux, macOS and Windows on both amd64 and arm64 are built by the
 
 ## Sign in
 
-Open CPA's Providers page and choose the ZCode sign-in tile. With the default
-`site: auto`, the plugin opens a site chooser with separate Z.AI and BigModel.cn
-entries, each using that site's logo. Choose the site where the subscription or
-gift plan belongs.
-
-Set `site: zai` or `site: bigmodel` to remove that page: the tile then returns
-the vendor's own authorize URL, so the dialog shows `chat.z.ai` or
-`bigmodel.cn` and no CPA-hosted address is involved. `site` is the first field
-of the plugin configuration form, rendered as a dropdown. Site selection order
-is the `site` query parameter, then `site` from the plugin configuration, then
-the chooser:
+Choose `site: zai` or `site: bigmodel` in CPA's native plugin configuration before
+opening the ZCode sign-in tile. The tile returns the vendor's own authorize URL.
+`site` is the first configuration field and is rendered as a dropdown:
 
 ```yaml
 plugins:
@@ -124,43 +120,48 @@ plugins:
       site: bigmodel
 ```
 
-Saving the plugin configuration reconfigures the plugin in place, so switching
-sites does not need a restart. Sign-in attempts started earlier keep the site
-they were created with.
+Saving the configuration reconfigures the plugin without a restart. Existing
+non-chooser sign-in attempts retain their original site and mode.
 
-The chooser link is origin-relative by default, so the browser resolves it
-against the host and path prefix that served the management UI. That covers
-direct access, public hostnames and NGINX reverse proxies; make sure the proxy
-forwards `/v0/resource/plugins/` alongside `/v0/management/` and `/v1/`. A
-configured `site` makes this link unnecessary.
+Site selection order is an explicit `site` query parameter on the authenticated
+native auth URL request, then the plugin's configured `site`. An invalid explicit
+value is rejected; it does not fall back to the configuration. The default `auto`,
+an empty selection, or an explicit `site=auto` cannot start a vendor flow: choose
+`zai` or `bigmodel` in the configuration or in the authenticated request. There is
+no browser chooser and no implicit default to Z.AI. Old pending chooser sessions
+require a new sign-in; existing non-chooser sessions and credential files remain
+compatible.
 
-Set `public_base_url` when the management UI is served from a different origin,
-lives under a path prefix, or you need an absolute link that can be copied to
-another device:
-
-```yaml
-plugins:
-  configs:
-    omc-zcode-oauth:
-      public_base_url: https://cpa.example.com
-```
-
-With `https://example.com/cpa` configured, the chooser link becomes
-`https://example.com/cpa/v0/resource/plugins/omc-zcode-oauth/oauth-select`; the
-path prefix is preserved so prefixed proxies keep working.
-
-For direct or automated login, the same endpoints can skip the chooser:
+These are CPA's existing management endpoints, not public plugin resources:
 
 ```text
 GET /v0/management/zcode-auth-url?site=zai
 GET /v0/management/zcode-auth-url?site=bigmodel
+GET /v8/management/oauth/auth-url?provider=zcode&site=bigmodel
 ```
+
+The caller must supply the management key in the `Authorization: Bearer ...`
+header. Do not put the key in a URL. Use the URL returned by CPA to complete the
+vendor's browser sign-in. A public request without that header cannot initiate
+a flow. Public plugin resources serve only the exact static `zai.png`,
+`bigmodel.png` and `omc.json` assets; query parameters never trigger an action.
+CPA's standard HTTP handler returns a generic `500` for a rejected login start;
+it does not expose the plugin's full site-selection error to the panel. Check the
+native plugin configuration first; CPA logs contain the detailed reason.
+
+`public_base_url` remains accepted and validated for existing configurations, but
+has no effect on native OAuth and does not restore the removed public chooser.
 
 Add `mode=team` to select a team seat. Complete the browser login, then poll:
 
 ```text
 GET /v0/management/get-auth-status?state=<opaque-state>
 ```
+
+Polling also requires the management authorization header. Cancel a pending flow
+with `DELETE /v0/management/oauth-session?state=<opaque-state>` (or the native v8
+`DELETE /v8/management/oauth/session` equivalent). Cancellation is handled by CPA;
+the plugin does not implement a separate cancellation endpoint.
 
 The state is encrypted and expires. Keep the auth directory private; its
 `type: zcode` files contain session material. ZCode session tokens cannot be
@@ -229,11 +230,10 @@ contain the business token those endpoints require.
   replaced.
 - **No models appear:** inspect model discovery errors in CPA logs and confirm
   the credential status is active.
-- **The site chooser does not open:** confirm the browser can reach
-  `<your CPA base URL>/v0/resource/plugins/omc-zcode-oauth/oauth-select`. The
-  returned link is origin-relative, so a proxy that forwards only
-  `/v0/management/` or `/v1/` breaks it; also set `public_base_url` when the
-  management UI runs on a different origin or path prefix than CPA.
+- **Login asks for an explicit site:** set the native `site` field to `zai` or
+  `bigmodel`, or pass that value to an authenticated auth-url request. `auto` no
+  longer opens a public chooser. A pending chooser from an older build must be
+  restarted; changing `public_base_url` cannot resume it.
 - **`503 ... last upstream error: empty_stream`:** CPA benches a credential
   after a failed upstream attempt, and with a single credential every request in
   that cooldown window repeats the same stale message. The plugin already
