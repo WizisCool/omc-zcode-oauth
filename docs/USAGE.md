@@ -33,8 +33,8 @@ plugins:
       max_concurrency: 3
       app_version: 3.16.3
       team_language: en
-      # Choose zai or bigmodel for the native OAuth tile. auto (default)
-      # requires an explicit site in the authenticated auth-url request.
+      # zai (default) or bigmodel. Login goes straight to that vendor's
+      # authorize page; a site in the authenticated auth-url request overrides it.
       site: zai
       # Legacy setting accepted for compatibility; no longer used for OAuth.
       # public_base_url: https://cpa.example.com
@@ -46,7 +46,7 @@ Use CPA's plugin store to install `omc-zcode-oauth`, or call:
 POST /v0/management/plugin-store/omc-zcode-oauth/install
 ```
 
-Select release `0.1.5` with `?version=0.1.5`.
+Select release `0.1.6` with `?version=0.1.6`.
 The archive contains one library file and is installed under
 `<plugins-dir>/<os>/<arch>/` as `omc-zcode-oauth-v<version>.so`, `.dylib` or `.dll`,
 depending on the target platform: the installed version is part of the file name. CPA
@@ -99,8 +99,8 @@ go mod download
 GOPROXY=off GOSUMDB=off go test ./...
 GOPROXY=off GOSUMDB=off go vet ./...
 cd ..
-make build VERSION=0.1.5
-make package VERSION=0.1.5
+make build VERSION=0.1.6
+make package VERSION=0.1.6
 ```
 
 `make build` uses the current machine's OS and architecture. Official release
@@ -109,8 +109,8 @@ artifacts for Linux, macOS and Windows on both amd64 and arm64 are built by the
 
 ## Sign in
 
-Choose `site: zai` or `site: bigmodel` in CPA's native plugin configuration before
-opening the ZCode sign-in tile. The tile returns the vendor's own authorize URL.
+Open the ZCode sign-in tile and the browser goes straight to the vendor's own
+authorize URL — `chat.z.ai` by default, or `bigmodel.cn` with `site: bigmodel`.
 `site` is the first configuration field and is rendered as a dropdown:
 
 ```yaml
@@ -125,11 +125,9 @@ non-chooser sign-in attempts retain their original site and mode.
 
 Site selection order is an explicit `site` query parameter on the authenticated
 native auth URL request, then the plugin's configured `site`. An invalid explicit
-value is rejected; it does not fall back to the configuration. The default `auto`,
-an empty selection, or an explicit `site=auto` cannot start a vendor flow: choose
-`zai` or `bigmodel` in the configuration or in the authenticated request. There is
-no browser chooser and no implicit default to Z.AI. Old pending chooser sessions
-require a new sign-in; existing non-chooser sessions and credential files remain
+value is rejected; it does not fall back to the configuration. A missing, empty,
+or legacy `auto` selection resolves to Z.AI. Old pending chooser sessions require
+a new sign-in; existing non-chooser sessions and credential files remain
 compatible.
 
 These are CPA's existing management endpoints, not public plugin resources:
@@ -148,7 +146,6 @@ a flow. Public plugin resources serve only the exact static `zai.png`,
 CPA's standard HTTP handler returns a generic `500` for a rejected login start;
 it does not expose the plugin's full site-selection error to the panel. Check the
 native plugin configuration first; CPA logs contain the detailed reason.
-
 `public_base_url` remains accepted and validated for existing configurations, but
 has no effect on native OAuth and does not restore the removed public chooser.
 
@@ -230,10 +227,10 @@ contain the business token those endpoints require.
   replaced.
 - **No models appear:** inspect model discovery errors in CPA logs and confirm
   the credential status is active.
-- **Login asks for an explicit site:** set the native `site` field to `zai` or
-  `bigmodel`, or pass that value to an authenticated auth-url request. `auto` no
-  longer opens a public chooser. A pending chooser from an older build must be
-  restarted; changing `public_base_url` cannot resume it.
+- **Login asks for an explicit site:** no longer applicable — a missing, empty
+  or legacy `auto` site now defaults to Z.AI. Only an invalid explicit `site`
+  value is rejected; set the native `site` field to `bigmodel` for China-portal
+  accounts. A pending chooser from an older build must be restarted.
 - **`503 ... last upstream error: empty_stream`:** CPA benches a credential
   after a failed upstream attempt, and with a single credential every request in
   that cooldown window repeats the same stale message. The plugin already

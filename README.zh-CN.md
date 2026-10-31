@@ -49,10 +49,10 @@ ZCode 账号有两个登录入口。两者产生同一种凭证；可以每次�
 | Z.ai | `zai` | `https://chat.z.ai/api/oauth/authorize` |
 | BigModel.cn | `bigmodel` | `https://bigmodel.cn/login?appId=zcode` |
 
-- `site: auto`（默认）：必须在受认证的原生登录请求中明确提供 `site=zai` 或
-  `site=bigmodel`，不再打开浏览器选择页。
-- `site: zai` / `site: bigmodel`：OAuth 卡片直接跳转对应站点的授权页。
+- `site: zai`（默认）：OAuth 卡片直接跳转 Z.ai 的授权页。
+- `site: bigmodel`：OAuth 卡片直接跳转 BigModel.cn 的授权页。
 - 受认证请求的 `?site=` 参数可对单次登录覆盖配置；无效值直接拒绝，不会回退。
+  缺失、为空或旧版 `auto` 的站点选择一律归为 Z.AI。
 
 ## 面板无关
 
@@ -66,7 +66,7 @@ OAuth 发起和轮询使用 CPA 原生受认证管理 API，公共插件资源�
 
 ## 功能
 
-- Z.ai 与 BigModel OAuth，通过原生受认证入口明确选择站点。
+- Z.ai 与 BigModel OAuth，通过原生受认证入口登录，默认站点 Z.AI。
 - 个人 Coding Plan、团队席位与纯礼包凭证。
 - 基于 ZCode 客户端目录的模型发现。
 - 纯礼包凭证将普通厂商模型名路由到礼包服务。
@@ -101,7 +101,7 @@ plugins:
 
 | 字段 | 类型 | 默认值 | 可选值 |
 | --- | --- | --- | --- |
-| `site` | 枚举 | `auto` | `zai`、`bigmodel`、`auto` |
+| `site` | 枚举 | `zai` | `zai`、`bigmodel` |
 | `mode` | 枚举 | `own` | `own`、`team` |
 | `max_concurrency` | 整数 | `3` | 每凭证 1–100 个并发请求 |
 | `app_version` | 字符串 | `3.16.3` | ZCode 客户端版本 |

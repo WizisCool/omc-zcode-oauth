@@ -14,44 +14,92 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
-func TestNativeLoginRequiresExplicitSiteWithoutSideEffects(t *testing.T) {
+// Invalid site values are refused without any vendor request. Empty and "auto"
+// are not invalid: they fall back to Z.AI (see TestNativeLoginDefaultsToZai).
+func TestNativeLoginRejectsInvalidSiteWithoutSideEffects(t *testing.T) {
 	t.Cleanup(func() { _ = configure(nil) })
-	for _, configured := range []string{"auto", "zai", "bigmodel"} {
-		for _, tc := range []struct {
-			name     string
-			metadata map[string]any
-		}{
-			{"missing", nil}, {"empty", map[string]any{"site": ""}},
-			{"auto", map[string]any{"site": "auto"}}, {"whitespace", map[string]any{"site": " "}},
-			{"unknown", map[string]any{"site": "other"}}, {"url", map[string]any{"site": "https://example.test"}},
-			{"null", map[string]any{"site": nil}}, {"number", map[string]any{"site": 1}},
-			{"duplicate", map[string]any{"site": []string{"zai", "bigmodel"}}},
-			{"json-array", map[string]any{"site": []any{"zai"}}},
-		} {
-			if configured != "auto" && tc.name == "missing" {
-				continue
+	for _, tc := range []struct {
+		name     string
+		metadata map[string]any
+	}{
+		{"unknown", map[string]any{"site": "other"}}, {"url", map[string]any{"site": "https://example.test"}},
+		{"null", map[string]any{"site": nil}}, {"number", map[string]any{"site": 1}},
+		{"duplicate", map[string]any{"site": []string{"zai", "bigmodel"}}},
+		{"json-array", map[string]any{"site": []any{"zai"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := configure(nil); err != nil {
+				t.Fatal(err)
 			}
-			t.Run(configured+"/"+tc.name, func(t *testing.T) {
-				if err := configure([]byte("site: " + configured + "\n")); err != nil {
+			dir := filepath.Join(t.TempDir(), "absent-auth")
+			sender := &fakeSender{reply: func(pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+				t.Error("invalid site contacted the vendor")
+				return pluginapi.HTTPResponse{}, fmt.Errorf("unexpected request")
+			}}
+			start, err := startLogin(pluginapi.AuthLoginStartRequest{Host: pluginapi.HostConfigSummary{AuthDir: dir}, Metadata: tc.metadata}, sender)
+			if err == nil || !strings.Contains(err.Error(), "site") || !strings.Contains(err.Error(), "zai") || !strings.Contains(err.Error(), "bigmodel") || start.URL != "" || start.State != "" {
+				t.Fatalf("expected actionable site error with no flow: err=%v", err)
+			}
+			if len(sender.requests) != 0 {
+				t.Fatal("rejected site made a vendor request")
+			}
+			if _, err := os.Stat(dir); !os.IsNotExist(err) {
+				t.Fatalf("rejected site created auth state: %v", err)
+			}
+		})
+	}
+}
+
+// A console that sends no site hint — OMC's connect flow — must still reach
+// the vendor's authorize page. Empty and "auto" resolve to Z.AI.
+func TestNativeLoginDefaultsToZai(t *testing.T) {
+	t.Cleanup(func() { _ = configure(nil) })
+	for _, tc := range []struct {
+		name     string
+		config   string
+		metadata map[string]any
+	}{
+		{"no site hint anywhere", "", nil},
+		{"metadata empty string", "", map[string]any{"site": ""}},
+		{"metadata whitespace", "", map[string]any{"site": " "}},
+		{"legacy auto configuration", "\nsite: auto", nil},
+		{"metadata auto overrides configured", "site: bigmodel", map[string]any{"site": "auto"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := configure([]byte(tc.config)); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now().Unix()
+			var initProvider string
+			sender := &fakeSender{reply: func(r pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+				if !strings.HasSuffix(r.URL, "/oauth/cli/init") {
+					return pluginapi.HTTPResponse{}, fmt.Errorf("unexpected request")
+				}
+				var body map[string]string
+				if err := json.Unmarshal(r.Body, &body); err != nil {
 					t.Fatal(err)
 				}
-				dir := filepath.Join(t.TempDir(), "absent-auth")
-				sender := &fakeSender{reply: func(pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
-					t.Error("invalid or missing site contacted the vendor")
-					return pluginapi.HTTPResponse{}, fmt.Errorf("unexpected request")
-				}}
-				start, err := startLogin(pluginapi.AuthLoginStartRequest{Host: pluginapi.HostConfigSummary{AuthDir: dir}, Metadata: tc.metadata}, sender)
-				if err == nil || !strings.Contains(err.Error(), "site") || !strings.Contains(err.Error(), "zai") || !strings.Contains(err.Error(), "bigmodel") || start.URL != "" || start.State != "" {
-					t.Fatalf("expected actionable site error with no flow: err=%v", err)
-				}
-				if len(sender.requests) != 0 {
-					t.Fatal("rejected site made a vendor request")
-				}
-				if _, err := os.Stat(dir); !os.IsNotExist(err) {
-					t.Fatalf("rejected site created auth state: %v", err)
-				}
-			})
-		}
+				initProvider = body["provider"]
+				return jsonReply(fmt.Sprintf(`{"flow_id":"0123456789abcdef0123456789abcdef","authorize_url":"https://chat.z.ai/api/oauth/authorize?client_id=c1&state=old","poll_interval_sec":2,"expires_at":%d}`, now+300)), nil
+			}}
+			start, err := startLogin(pluginapi.AuthLoginStartRequest{Host: pluginapi.HostConfigSummary{AuthDir: t.TempDir()}, Metadata: tc.metadata}, sender)
+			if err != nil {
+				t.Fatal(err)
+			}
+			u, err := url.Parse(start.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !u.IsAbs() || u.Host != "chat.z.ai" {
+				t.Fatalf("login without a site hint did not reach the vendor authorize page: %q", start.URL)
+			}
+			if initProvider != "zai" {
+				t.Fatalf("init provider = %q, want zai", initProvider)
+			}
+			if start.State == "" {
+				t.Fatal("missing login state")
+			}
+		})
 	}
 }
 

@@ -22,7 +22,7 @@ var configMu sync.RWMutex
 var currentConfig = defaults()
 
 func defaults() config {
-	return config{Mode: "own", MaxConcurrency: 3, AppVersion: "3.16.3", TeamLanguage: "en", Site: "auto"}
+	return config{Mode: "own", MaxConcurrency: 3, AppVersion: "3.16.3", TeamLanguage: "en", Site: "zai"}
 }
 func getConfig() config { configMu.RLock(); defer configMu.RUnlock(); return currentConfig }
 func configure(raw []byte) error {
@@ -42,11 +42,13 @@ func configure(raw []byte) error {
 		}
 	}
 	c.Site = strings.TrimSpace(strings.ToLower(c.Site))
-	if c.Site == "" {
-		c.Site = "auto"
+	// Empty, "auto" and unknown values all fall back to Z.AI; only an explicit
+	// choice selects BigModel.
+	if c.Site == "" || c.Site == "auto" {
+		c.Site = "zai"
 	}
-	if c.Site != "auto" && c.Site != "zai" && c.Site != "bigmodel" {
-		return fmt.Errorf("invalid zcode plugin configuration: site must be auto, zai or bigmodel")
+	if c.Site != "zai" && c.Site != "bigmodel" {
+		return fmt.Errorf("invalid zcode plugin configuration: site must be zai or bigmodel")
 	}
 	configMu.Lock()
 	currentConfig = c

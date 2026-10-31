@@ -51,12 +51,11 @@ credential; pick a site per login, or fix the choice in config.
 | Z.ai | `zai` | `https://chat.z.ai/api/oauth/authorize` |
 | BigModel.cn | `bigmodel` | `https://bigmodel.cn/login?appId=zcode` |
 
-- `site: auto` (default): requires an explicit `site=zai` or `site=bigmodel` in
-  the authenticated native login request; it does not open a browser chooser.
-- `site: zai` / `site: bigmodel`: the OAuth tile opens that vendor's authorize
-  page directly.
+- `site: zai` (default): the OAuth tile opens Z.ai's authorize page directly.
+- `site: bigmodel`: the OAuth tile opens BigModel.cn's authorize page directly.
 - A request-scoped `?site=` parameter overrides the configured site for a
-  single authenticated login. Invalid overrides are rejected.
+  single authenticated login. Invalid overrides are rejected. A missing, empty
+  or legacy `auto` selection resolves to Z.AI.
 
 ## Panel-agnostic by design
 
@@ -72,7 +71,7 @@ resources contain only static logos and the optional description declaration.
 
 ## Features
 
-- Z.ai and BigModel OAuth through native authenticated login with an explicit site.
+- Z.ai and BigModel OAuth through native authenticated login, defaulting to Z.AI.
 - Personal Coding Plan, team-seat and gift-only credentials.
 - Model discovery from ZCode's client catalogue.
 - Gift-only credentials route ordinary vendor model names through the gift service.
@@ -110,7 +109,7 @@ Releases are created by GitHub Actions whenever a `v*` tag is pushed.
 
 | Field | Type | Default | Values |
 | --- | --- | --- | --- |
-| `site` | enum | `auto` | `zai`, `bigmodel`, `auto` |
+| `site` | enum | `zai` | `zai`, `bigmodel` |
 | `mode` | enum | `own` | `own`, `team` |
 | `max_concurrency` | integer | `3` | 1–100 requests per credential |
 | `app_version` | string | `3.16.3` | ZCode client version |

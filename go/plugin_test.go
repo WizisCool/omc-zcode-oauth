@@ -220,13 +220,13 @@ func TestConfigValidatesSite(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	for _, raw := range []string{"site: zai\n", "site: BigModel\n", "site:\n"} {
+	for _, raw := range []string{"site: zai\n", "site: BigModel\n", "site: auto\n", "site:\n"} {
 		if err := configure([]byte(raw)); err != nil {
 			t.Fatalf("rejected %q: %v", raw, err)
 		}
 	}
-	if got := getConfig().Site; got != "auto" {
-		t.Fatalf("empty site should fall back to auto, got %q", got)
+	if got := getConfig().Site; got != "zai" {
+		t.Fatalf("empty or auto site should fall back to zai, got %q", got)
 	}
 	for _, raw := range []string{"site: z.ai\n", "site: both\n"} {
 		if err := configure([]byte(raw)); err == nil {

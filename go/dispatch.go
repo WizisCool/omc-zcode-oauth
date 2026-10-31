@@ -8,7 +8,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
-var pluginVersion = "0.1.5"
+var pluginVersion = "0.1.6"
 
 type rpcAuthStart struct {
 	pluginapi.AuthLoginStartRequest
@@ -47,7 +47,7 @@ func unmarshal(raw []byte, out any) error {
 }
 func registration() any {
 	return map[string]any{"schema_version": pluginabi.SchemaVersion, "metadata": pluginapi.Metadata{Name: "OMC ZCode OAuth", Version: pluginVersion, Author: "JUNZE", GitHubRepository: "https://github.com/WizisCool/omc-zcode-oauth", Logo: "https://raw.githubusercontent.com/WizisCool/omc-zcode-oauth/refs/heads/main/assets/logo.png", ConfigFields: []pluginapi.ConfigField{
-		{Name: "site", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"zai", "bigmodel", "auto"}, Description: "ZCode sign-in site: zai or bigmodel. auto requires an explicit site in the authenticated login request; no public chooser is provided (default auto)."},
+		{Name: "site", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"zai", "bigmodel"}, Description: "ZCode sign-in site: zai (the default) or bigmodel. Login goes straight to that vendor's authorize page; a site in the authenticated login request overrides this."},
 		{Name: "mode", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"own", "team"}, Description: "Default OAuth plan selection (default own)."},
 		{Name: "max_concurrency", Type: pluginapi.ConfigFieldTypeInteger, Description: "Maximum simultaneous requests per credential (default 3)."},
 		{Name: "app_version", Type: pluginapi.ConfigFieldTypeString, Description: "ZCode client version (default 3.16.3)."},

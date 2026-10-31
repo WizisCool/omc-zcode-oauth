@@ -131,7 +131,8 @@ func startLogin(req pluginapi.AuthLoginStartRequest, sender httpSender) (plugina
 	return pluginapi.AuthLoginStartResponse{Provider: "zcode", URL: flow.URL, State: state, ExpiresAt: time.Unix(flow.Expires, 0).UTC()}, nil
 }
 
-// loginSite resolves only an explicit site. The native host forwards authenticated
+// loginSite resolves the sign-in site: an explicit metadata value wins, then
+// the configured default, then Z.AI. The native host forwards authenticated
 // login query parameters into Metadata; an invalid override must never fall back.
 func loginSite(metadata map[string]any, configured string) (string, error) {
 	site := configured
@@ -142,8 +143,10 @@ func loginSite(metadata map[string]any, configured string) (string, error) {
 		}
 		site = strings.TrimSpace(value)
 	}
+	// Empty and "auto" mean Z.AI so a console that sends no site hint — OMC's
+	// connect flow — still reaches the vendor's authorize page.
 	if site == "" || site == "auto" {
-		return "", errors.New("choose a ZCode site: set site to zai or bigmodel in the native plugin configuration, or pass site=zai or site=bigmodel to the authenticated login request")
+		site = "zai"
 	}
 	if site != "zai" && site != "bigmodel" {
 		return "", errors.New("invalid login site: use zai or bigmodel")
