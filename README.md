@@ -43,19 +43,26 @@ control plane and usage console for CLIProxyAPI.
 > v0.1.5 fixes Issue #1 by removing the dynamic public OAuth resources. v0.1.3 and
 > v0.1.4 remain affected; upgrade before exposing either older build.
 
-ZCode accounts can sign in through two portals. Both produce the same
-credential; pick a site per login, or fix the choice in config.
+ZCode accounts can sign in through two portals. Both produce the same credential
+(`"type": "zcode"`) and share one executor, but they are different login hosts
+and different brands, so 0.2.0 registers them as two separate OAuth entries
+instead of one entry plus a `site` dropdown.
 
-| Portal | `site` value | Authorize endpoint |
+| Portal | Login entry | Authorize endpoint |
 | --- | --- | --- |
-| Z.ai | `zai` | `https://chat.z.ai/api/oauth/authorize` |
-| BigModel.cn | `bigmodel` | `https://bigmodel.cn/login?appId=zcode` |
+| Z.AI | `zcode-zai` | `https://chat.z.ai/api/oauth/authorize` |
+| BigModel | `zcode-bigmodel` | `https://bigmodel.cn/login?appId=zcode` |
 
-- `site: zai` (default): the OAuth tile opens Z.ai's authorize page directly.
-- `site: bigmodel`: the OAuth tile opens BigModel.cn's authorize page directly.
-- A request-scoped `?site=` parameter overrides the configured site for a
-  single authenticated login. Invalid overrides are rejected. A missing, empty
-  or legacy `auto` selection resolves to Z.AI.
+On a panel that renders per-entry metadata (CPA v8.0.51+) each entry appears as
+its own card with its own name and logo. Those need **CPA v8.0.49+ to load**, and
+v8.0.51+ for the separate names and artwork.
+
+- Pick the portal by picking its entry. The entry wins over any `site` hint.
+- `site` (default `zai`) is now only the fallback for a login request that names
+  no entry — for example a legacy panel that knows just the singular identifier.
+- A request-scoped `?site=` parameter still overrides that fallback for a single
+  authenticated login. Invalid overrides are rejected. A missing, empty or legacy
+  `auto` selection resolves to Z.AI.
 
 ## Panel-agnostic by design
 
@@ -109,7 +116,7 @@ Releases are created by GitHub Actions whenever a `v*` tag is pushed.
 
 | Field | Type | Default | Values |
 | --- | --- | --- | --- |
-| `site` | enum | `zai` | `zai`, `bigmodel` |
+| `site` | enum | `zai` | Fallback portal when a login request names no entry: `zai`, `bigmodel` |
 | `mode` | enum | `own` | `own`, `team` |
 | `max_concurrency` | integer | `3` | 1–100 requests per credential |
 | `app_version` | string | `3.16.3` | ZCode client version |

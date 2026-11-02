@@ -64,6 +64,33 @@ def smoke(library, version, descriptor):
         registration = rpc("plugin.register", {})
         if registration["metadata"]["Version"] != version:
             raise ValueError("native registration differs from release version")
+        if registration.get("schema_version") != 10:
+            raise ValueError("native registration must declare schema 10 for multi-entry OAuth")
+        # Two OAuth login entries, each with its own name and logo. A host
+        # publishes these as oauth_provider / oauth_providers /
+        # oauth_provider_entries, so the shape is checked here rather than only
+        # in the offline unit tests.
+        identifier = rpc("auth.identifier", {})
+        if identifier.get("identifier") != "zcode-zai":
+            raise ValueError("native primary OAuth identifier must be zcode-zai")
+        if identifier.get("identifiers") != ["zcode-zai", "zcode-bigmodel"]:
+            raise ValueError("native OAuth identifiers must be [zcode-zai, zcode-bigmodel]")
+        credentials = identifier.get("credential_providers") or []
+        if "zcode" not in credentials:
+            raise ValueError("native credential provider zcode must be declared")
+        entries = identifier.get("entries") or []
+        if [entry.get("identifier") for entry in entries] != ["zcode-zai", "zcode-bigmodel"]:
+            raise ValueError("native OAuth entries must match the declared identifiers")
+        for entry, expected_name, expected_asset in ((entries[0], "Z.AI", "zai.png"), (entries[1], "BigModel", "bigmodel.png")):
+            if not entry.get("name") or not entry.get("logo"):
+                raise ValueError("native OAuth entry is missing a display name or logo")
+            if entry["name"] != expected_name or not entry["logo"].endswith("/" + expected_asset):
+                raise ValueError(f"native OAuth entry {entry.get('identifier')} has the wrong name or logo")
+        if entries[0]["logo"] == entries[1]["logo"]:
+            raise ValueError("native OAuth entries must not share one logo")
+        for method in ("executor.identifier", "quota.identifier"):
+            if rpc(method, {}).get("identifier") != "zcode":
+                raise ValueError(f"native {method} must stay on the zcode provider key")
         management = rpc("management.register", {})
         resources = management["resources"]
         if [entry["path"] for entry in resources] != ["/zai.png", "/bigmodel.png", "/omc.json"] or any(entry["menu"] for entry in resources) or management.get("routes"):

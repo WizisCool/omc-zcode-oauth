@@ -36,22 +36,26 @@ Coding Plan / 团队 / 礼包路由和标准化配额——无需独立进程，
 本项目是 [Oh-My-CPA](https://github.com/WizisCool/oh-my-cpa) 生态的一部分——
 Oh-My-CPA 是 CLIProxyAPI 的自托管控制面板与用量观测台。
 
-## 两个站点，一个 provider
+## 两个门户，一个 provider
 
 > v0.1.5 已修复 Issue #1，移除公共动态 OAuth 资源。v0.1.3/v0.1.4 仍受影响，
 > 对外开放前请先升级并阅读 [安全说明](docs/USAGE.md)。
 
-ZCode 账号有两个登录入口。两者产生同一种凭证；可以每次登录时选择站点，也可以在
-配置中固定。
+ZCode 账号可以通过两个门户登录。两者产生同一种凭证（`"type": "zcode"`）并共用
+同一个 executor，但登录域名不同、品牌也不同，因此 0.2.0 把它们注册为两个独立的
+OAuth 入口，而不是一个入口加一个 `site` 下拉框。
 
-| 站点 | `site` 取值 | 授权端点 |
+| 门户 | 登录入口 | 授权端点 |
 | --- | --- | --- |
-| Z.ai | `zai` | `https://chat.z.ai/api/oauth/authorize` |
-| BigModel.cn | `bigmodel` | `https://bigmodel.cn/login?appId=zcode` |
+| Z.AI | `zcode-zai` | `https://chat.z.ai/api/oauth/authorize` |
+| BigModel | `zcode-bigmodel` | `https://bigmodel.cn/login?appId=zcode` |
 
-- `site: zai`（默认）：OAuth 卡片直接跳转 Z.ai 的授权页。
-- `site: bigmodel`：OAuth 卡片直接跳转 BigModel.cn 的授权页。
-- 受认证请求的 `?site=` 参数可对单次登录覆盖配置；无效值直接拒绝，不会回退。
+在支持逐入口元数据的面板（CPA v8.0.51+）上，每个入口各自成为一张卡片，带自己的
+名称和 logo。加载本插件需要 **CPA v8.0.49+**，独立的名称与图标需要 v8.0.51+。
+
+- 选入口即选门户。入口优先于任何 `site` 提示。
+- `site`（默认 `zai`）现在只是未指定入口时的兜底——例如只认识单数标识符的旧面板。
+- 受认证请求的 `?site=` 参数仍可对单次登录覆盖该兜底值；无效值直接拒绝。
   缺失、为空或旧版 `auto` 的站点选择一律归为 Z.AI。
 
 ## 面板无关
@@ -101,7 +105,7 @@ plugins:
 
 | 字段 | 类型 | 默认值 | 可选值 |
 | --- | --- | --- | --- |
-| `site` | 枚举 | `zai` | `zai`、`bigmodel` |
+| `site` | 枚举 | `zai` | 未指定入口时的兜底门户：`zai`、`bigmodel` |
 | `mode` | 枚举 | `own` | `own`、`team` |
 | `max_concurrency` | 整数 | `3` | 每凭证 1–100 个并发请求 |
 | `app_version` | 字符串 | `3.16.3` | ZCode 客户端版本 |

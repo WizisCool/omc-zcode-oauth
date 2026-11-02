@@ -8,8 +8,13 @@
 
 - CLIProxyAPI v8 with dynamic plugin support and the quota provider.
 - A CPA build that accepts the plugin's declared ABI and RPC schema: the plugin
-  registers ABI 1 and schema 6 from its pinned SDK, and an older host refuses it at
-  registration with `plugin schema version 6 is not supported`.
+  registers ABI 1 and schema 10 from its pinned SDK, and an older host refuses it at
+  registration with `plugin schema version 10 is not supported`.
+- **CPA v8.0.49 or later** to load 0.2.0 at all (schema 10 first shipped there), and
+  **CPA v8.0.51 or later** for the separate Z.AI and BigModel sign-in cards: per-entry
+  name and logo (`oauth_provider_entries`) first shipped in v8.0.51. On an older host
+  both entries still work — a panel that predates the field shows one card per
+  *identifier* decorated with the plugin's own name and logo.
 - Go 1.27.1 for local development. Release builds are produced by CI.
 
 The dynamic dependencies observed in the v0.1.3 archives set that release's floor: the
@@ -46,7 +51,7 @@ Use CPA's plugin store to install `omc-zcode-oauth`, or call:
 POST /v0/management/plugin-store/omc-zcode-oauth/install
 ```
 
-Select release `0.1.6` with `?version=0.1.6`.
+Select release `0.2.0` with `?version=0.2.0`.
 The archive contains one library file and is installed under
 `<plugins-dir>/<os>/<arch>/` as `omc-zcode-oauth-v<version>.so`, `.dylib` or `.dll`,
 depending on the target platform: the installed version is part of the file name. CPA
@@ -99,8 +104,8 @@ go mod download
 GOPROXY=off GOSUMDB=off go test ./...
 GOPROXY=off GOSUMDB=off go vet ./...
 cd ..
-make build VERSION=0.1.6
-make package VERSION=0.1.6
+make build VERSION=0.2.0
+make package VERSION=0.2.0
 ```
 
 `make build` uses the current machine's OS and architecture. Official release
@@ -109,32 +114,49 @@ artifacts for Linux, macOS and Windows on both amd64 and arm64 are built by the
 
 ## Sign in
 
-Open the ZCode sign-in tile and the browser goes straight to the vendor's own
-authorize URL — `chat.z.ai` by default, or `bigmodel.cn` with `site: bigmodel`.
-`site` is the first configuration field and is rendered as a dropdown:
+The plugin registers **two OAuth login entries**, one per vendor portal:
+
+| Entry identifier | Portal | Sign-in host |
+| --- | --- | --- |
+| `zcode-zai` | Z.AI | `chat.z.ai` |
+| `zcode-bigmodel` | BigModel | `bigmodel.cn` |
+
+Both produce the same credential shape (`"type": "zcode"`) and use the same
+executor. On a panel that supports it, each entry renders as its own card with its
+own name and logo (CPA v8.0.51+); the identifier is what CPA routes the login,
+poll, and callback by.
+
+`site` is no longer the way to pick a portal — the entry does that. It survives as
+the fallback for a login request that names no entry, and is the first
+configuration field:
 
 ```yaml
 plugins:
   configs:
     omc-zcode-oauth:
-      site: bigmodel
+      # Fallback only: used when a request names no entry (e.g. a legacy panel
+      # that only knows the singular identifier). Defaults to zai.
+      site: zai
 ```
 
 Saving the configuration reconfigures the plugin without a restart. Existing
-non-chooser sign-in attempts retain their original site and mode.
+sign-in attempts retain their original site and mode.
 
-Site selection order is an explicit `site` query parameter on the authenticated
-native auth URL request, then the plugin's configured `site`. An invalid explicit
-value is rejected; it does not fall back to the configuration. A missing, empty,
-or legacy `auto` selection resolves to Z.AI. Old pending chooser sessions require
-a new sign-in; existing non-chooser sessions and credential files remain
-compatible.
+Resolution order for the portal is: the entry the request names, then an explicit
+`site` query parameter, then the configured `site`, then Z.AI. An explicit invalid
+`site` is rejected rather than falling back to the configuration. A legacy
+`auto` selection resolves to Z.AI. Old pending chooser sessions require a new
+sign-in; existing session and credential files remain compatible, and every
+credential written from 0.2.0 records its entry as `oauth_provider`.
 
 These are CPA's existing management endpoints, not public plugin resources:
 
 ```text
-GET /v0/management/zcode-auth-url?site=zai
-GET /v0/management/zcode-auth-url?site=bigmodel
+GET /v8/management/oauth/auth-url?provider=zcode-zai
+GET /v8/management/oauth/auth-url?provider=zcode-bigmodel
+GET /v0/management/zcode-zai-auth-url
+GET /v0/management/zcode-bigmodel-auth-url
+# Legacy: names no entry, so the configured site decides the portal.
 GET /v8/management/oauth/auth-url?provider=zcode&site=bigmodel
 ```
 
@@ -144,8 +166,8 @@ vendor's browser sign-in. A public request without that header cannot initiate
 a flow. Public plugin resources serve only the exact static `zai.png`,
 `bigmodel.png` and `omc.json` assets; query parameters never trigger an action.
 CPA's standard HTTP handler returns a generic `500` for a rejected login start;
-it does not expose the plugin's full site-selection error to the panel. Check the
-native plugin configuration first; CPA logs contain the detailed reason.
+it does not expose the plugin's full error to the panel. Check the native plugin
+configuration first; CPA logs contain the detailed reason.
 `public_base_url` remains accepted and validated for existing configurations, but
 has no effect on native OAuth and does not restore the removed public chooser.
 

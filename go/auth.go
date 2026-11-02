@@ -104,7 +104,7 @@ func startLogin(req pluginapi.AuthLoginStartRequest, sender httpSender) (plugina
 	if req.Host.AuthDir == "" {
 		return out, errors.New("CPA auth directory unavailable")
 	}
-	site, err := loginSite(req.Metadata, cfg.Site)
+	site, err := loginSite(req.Provider, req.Metadata, cfg.Site)
 	if err != nil {
 		return out, err
 	}
@@ -131,11 +131,19 @@ func startLogin(req pluginapi.AuthLoginStartRequest, sender httpSender) (plugina
 	return pluginapi.AuthLoginStartResponse{Provider: "zcode", URL: flow.URL, State: state, ExpiresAt: time.Unix(flow.Expires, 0).UTC()}, nil
 }
 
-// loginSite resolves the sign-in site: an explicit metadata value wins, then
-// the configured default, then Z.AI. The native host forwards authenticated
-// login query parameters into Metadata; an invalid override must never fall back.
-func loginSite(metadata map[string]any, configured string) (string, error) {
+// loginSite resolves the sign-in site: the portal the user picked wins, then an
+// explicit metadata value, then the configured default, then Z.AI. The native
+// host forwards authenticated login query parameters into Metadata; an invalid
+// override must never fall back.
+func loginSite(provider string, metadata map[string]any, configured string) (string, error) {
 	site := configured
+	portal, err := siteForProvider(provider)
+	if err != nil {
+		return "", err
+	}
+	if portal != "" {
+		return portal, nil
+	}
 	if raw, present := metadata["site"]; present {
 		value, ok := raw.(string)
 		if !ok {
@@ -152,6 +160,57 @@ func loginSite(metadata map[string]any, configured string) (string, error) {
 		return "", errors.New("invalid login site: use zai or bigmodel")
 	}
 	return site, nil
+}
+
+// OAuth login entries registered with the host. The identifier is the provider
+// key CPA routes login, poll, and callback requests by; the display name and
+// logo let a console render each portal as its own card instead of reusing the
+// plugin's single name and mark for both.
+const (
+	zaiEntryID      = "zcode-zai"
+	bigmodelEntryID = "zcode-bigmodel"
+	// credentialProvider is the provider key every credential this plugin writes
+	// carries. It is declared as a credential provider below so a host resolving
+	// an existing "type": "zcode" auth file still finds this plugin, and so a
+	// re-login of such a file lands on a real entry instead of being rejected.
+	credentialProvider = "zcode"
+)
+
+// authEntries publishes one entry per portal. Values match the identifiers in
+// Identifiers(); see dispatch.go for the wire response.
+func authEntries() []pluginapi.AuthProviderEntry {
+	return []pluginapi.AuthProviderEntry{
+		{Identifier: zaiEntryID, Name: "Z.AI", Logo: resourceAssetURL("zai.png")},
+		{Identifier: bigmodelEntryID, Name: "BigModel", Logo: resourceAssetURL("bigmodel.png")},
+	}
+}
+
+// siteForProvider maps a login entry to its vendor site. An empty provider is
+// not an entry — the host sends the bare plugin key on panels that only know the
+// singular identifier, and existing auth files carry "type": "zcode" — so both
+// fall through to the configured site. An identifier that is neither an entry
+// nor the plugin's own credential key is a caller error rather than a silent
+// Z.AI sign-in.
+func siteForProvider(provider string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "", credentialProvider:
+		return "", nil
+	case zaiEntryID:
+		return "zai", nil
+	case bigmodelEntryID:
+		return "bigmodel", nil
+	default:
+		return "", errors.New("unknown login entry: use " + zaiEntryID + " or " + bigmodelEntryID)
+	}
+}
+
+// entryForSite is the login entry a credential came from. It is the inverse of
+// siteForProvider and is what gets persisted as oauth_provider.
+func entryForSite(site string) string {
+	if site == "bigmodel" {
+		return bigmodelEntryID
+	}
+	return zaiEntryID
 }
 
 func pollLogin(req pluginapi.AuthLoginPollRequest, sender httpSender) (pluginapi.AuthLoginPollResponse, error) {
@@ -243,7 +302,9 @@ func pollVendorFlow(s loginState, sender httpSender) (pluginapi.AuthLoginPollRes
 	}
 	sum := sha256.Sum256([]byte(s.Site + "\x00" + uid + "\x00" + c.Org + "\x00" + c.Project))
 	id := "zcode-" + hex.EncodeToString(sum[:12]) + ".json"
-	auth := pluginapi.AuthData{Provider: "zcode", ID: id, FileName: id, Label: label, StorageJSON: dataJSON, Metadata: map[string]any{"email": label, "type": "zcode"}}
+	// oauth_provider records which login entry produced this credential, so a
+	// console can attribute it to a card and a re-login can find its portal.
+	auth := pluginapi.AuthData{Provider: credentialProvider, ID: id, FileName: id, Label: label, StorageJSON: dataJSON, Metadata: map[string]any{"email": label, "type": credentialProvider, "oauth_provider": entryForSite(s.Site)}}
 	if c.Key == "" {
 		if expiry := jwtExpiry(c.JWT); expiry > 0 {
 			auth.NextRefreshAfter = time.Unix(expiry, 0).UTC()
@@ -284,14 +345,17 @@ func jwtExpiry(s string) int64 {
 	return c.Exp
 }
 func parseAuth(req pluginapi.AuthParseRequest) pluginapi.AuthParseResponse {
-	if req.Provider != "" && req.Provider != "zcode" {
+	// Provider is a login entry here as well as the credential key: the host may
+	// ask for "zcode-zai", the entry's own key, or the bare "zcode" an existing
+	// auth file carries. Anything else is somebody else's credential.
+	if _, err := siteForProvider(req.Provider); err != nil {
 		return pluginapi.AuthParseResponse{}
 	}
 	var metadata struct {
 		Type  string `json:"type"`
 		Email string `json:"email"`
 	}
-	if json.Unmarshal(req.RawJSON, &metadata) != nil || metadata.Type != "zcode" {
+	if json.Unmarshal(req.RawJSON, &metadata) != nil || metadata.Type != credentialProvider {
 		return pluginapi.AuthParseResponse{}
 	}
 	c, err := readCredential(req.RawJSON)
@@ -302,7 +366,8 @@ func parseAuth(req pluginapi.AuthParseRequest) pluginapi.AuthParseResponse {
 	if name == "" {
 		name = req.Path
 	}
-	a := pluginapi.AuthData{Provider: "zcode", ID: name, FileName: req.FileName, Label: metadata.Email, StorageJSON: append([]byte(nil), req.RawJSON...), Metadata: map[string]any{"email": metadata.Email, "type": "zcode"}}
+	a := pluginapi.AuthData{Provider: credentialProvider, ID: name, FileName: req.FileName, Label: metadata.Email, StorageJSON: append([]byte(nil), req.RawJSON...), Metadata: map[string]any{"email": metadata.Email, "type": credentialProvider}}
+	a.Metadata["oauth_provider"] = entryForSite(c.Site)
 	if c.Key == "" {
 		if exp := jwtExpiry(c.JWT); exp > 0 {
 			a.NextRefreshAfter = time.Unix(exp, 0).UTC()
