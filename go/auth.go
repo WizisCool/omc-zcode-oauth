@@ -63,7 +63,7 @@ type vendorLoginFlow struct {
 	Expires  int64
 }
 
-func beginVendorFlow(sender httpSender, site, appVersion string, bearerBytes []byte) (vendorLoginFlow, error) {
+func beginVendorFlow(sender httpSender, site string, bearerBytes []byte) (vendorLoginFlow, error) {
 	var flow vendorLoginFlow
 	bearer, device := deriveStateValues(bearerBytes)
 	data, err := apiCall(sender, "POST", zcodeRoot+"/api/v1/oauth/cli/init", "Bearer "+bearer, device, nil, map[string]string{"provider": site})
@@ -83,15 +83,11 @@ func beginVendorFlow(sender httpSender, site, appVersion string, bearerBytes []b
 	if err != nil || u.Scheme != "https" || u.Host == "" {
 		return flow, errors.New("ZCode returned an invalid authorization URL")
 	}
-	redirect := zcodeRoot + "/app/oauth/login?" + url.Values{"redirect": {"zcode://oauth/callback"}, "app_version": {appVersion}}.Encode()
-	q := u.Query()
-	if site == "bigmodel" {
-		q.Set("redirect", redirect)
-	} else {
-		q.Set("redirect_uri", redirect)
-	}
-	u.RawQuery = q.Encode()
-	return vendorLoginFlow{FlowID: response.FlowID, URL: u.String(), Interval: response.Interval, Expires: response.Expires}, nil
+	// CLI init owns the provider callback and its state. That server-side
+	// callback completes the flow consumed by pollVendorFlow; preserve the
+	// authorization URL verbatim rather than sending the browser to the
+	// desktop app's deep-link bridge.
+	return vendorLoginFlow{FlowID: response.FlowID, URL: response.URL, Interval: response.Interval, Expires: response.Expires}, nil
 }
 
 func startLogin(req pluginapi.AuthLoginStartRequest, sender httpSender) (pluginapi.AuthLoginStartResponse, error) {
@@ -120,7 +116,7 @@ func startLogin(req pluginapi.AuthLoginStartRequest, sender httpSender) (plugina
 	if err != nil {
 		return out, errors.New("cannot generate login bearer")
 	}
-	flow, err := beginVendorFlow(sender, site, cfg.AppVersion, bearerBytes)
+	flow, err := beginVendorFlow(sender, site, bearerBytes)
 	if err != nil {
 		return out, err
 	}

@@ -100,13 +100,14 @@ func TestEncryptedStateAcrossCallsAndTampering(t *testing.T) {
 }
 func TestStartAndPollOAuth(t *testing.T) {
 	now := time.Now().Unix()
+	authorize := vendorAuthorizeURLForTest("bigmodel")
 	var initBearer, initDevice string
 	sender := &fakeSender{reply: func(r pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
 		switch {
 		case strings.HasSuffix(r.URL, "/oauth/cli/init"):
 			initBearer = r.Headers.Get("Authorization")
 			initDevice = r.Headers.Get("X-Device-Mid")
-			return jsonReply(fmt.Sprintf(`{"flow_id":"0123456789abcdef0123456789abcdef","authorize_url":"https://example.test/login?redirect=old","poll_interval_sec":2,"expires_at":%d}`, now+300)), nil
+			return jsonReply(fmt.Sprintf(`{"flow_id":"0123456789abcdef0123456789abcdef","authorize_url":%q,"poll_interval_sec":2,"expires_at":%d}`, authorize, now+300)), nil
 		case strings.Contains(r.URL, "/oauth/cli/poll/"):
 			if r.Headers.Get("Authorization") != initBearer || r.Headers.Get("X-Device-Mid") != initDevice {
 				t.Error("poll identity changed")
@@ -127,8 +128,8 @@ func TestStartAndPollOAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	back, err := url.Parse(u.Query().Get("redirect"))
-	if err != nil || back.Host != "zcode.z.ai" || back.Query().Get("redirect") != "zcode://oauth/callback" || back.Query().Get("app_version") != "3.16.3" {
-		t.Fatalf("wrong redirect")
+	if err != nil || back.String() != zcodeRoot+"/api/v1/oauth/cli/callback/bigmodel" || u.Query().Get("state") != "synthetic-vendor-state" {
+		t.Fatal("CLI callback or provider state changed")
 	}
 	if !strings.HasPrefix(initBearer, "Bearer ") || len(initBearer) != 71 || !uuidPattern.MatchString(initDevice) {
 		t.Fatal("invalid login identity")

@@ -76,6 +76,11 @@ OAuth starts and polling use CPA's authenticated management API. Public plugin
 resources contain only static logos and the optional description declaration.
 `public_base_url` is a legacy compatibility setting and no longer affects login.
 
+The login flow keeps the authorization URL returned by ZCode CLI init unchanged.
+Z.ai and BigModel send the browser back to ZCode's server-side CLI callback;
+CPA polls that flow and saves the credential. No VS Code or ZCode desktop app,
+local callback listener, or manual callback URL submission is required.
+
 ## Features
 
 - Z.ai and BigModel OAuth through native authenticated login, defaulting to Z.AI.

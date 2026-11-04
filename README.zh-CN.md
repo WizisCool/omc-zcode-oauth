@@ -68,6 +68,10 @@ CPA 的插件 ABI 与管理 API 呈现。插件在 [Oh-My-CPA](https://github.co
 OAuth 发起和轮询使用 CPA 原生受认证管理 API，公共插件资源仅提供静态 Logo 与可选
 描述声明。`public_base_url` 为兼容旧配置保留并继续校验，但不再影响登录流程。
 
+登录流程原样保留 ZCode CLI 初始化接口返回的授权 URL。Z.ai 与 BigModel 登录完成后，
+浏览器返回 ZCode 服务端的 CLI 回调，CPA 通过轮询取得并保存凭证。无需安装 VS Code
+或 ZCode 桌面应用，也无需本地回调监听器或手动粘贴回调地址。
+
 ## 功能
 
 - Z.ai 与 BigModel OAuth，通过原生受认证入口登录，默认站点 Z.AI。

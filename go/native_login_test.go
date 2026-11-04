@@ -180,6 +180,69 @@ func TestLegacyLoginStatesRemainCompatible(t *testing.T) {
 	}
 }
 
+// These mirror the CLI init contract, with synthetic provider state distinct
+// from the flow ID and CPA's encrypted polling state. Keep the raw query intact.
+func vendorAuthorizeURLForTest(site string) string {
+	if site == "bigmodel" {
+		return "https://bigmodel.cn/login?appId=zcode&redirect=https%3a%2f%2fzcode.z.ai%2fapi%2fv1%2foauth%2fcli%2fcallback%2fbigmodel&state=synthetic-vendor-state&scope=one+two&scope=three%20four"
+	}
+	return "https://chat.z.ai/api/oauth/authorize?client_id=synthetic-client&redirect_uri=https%3a%2f%2fzcode.z.ai%2fapi%2fv1%2foauth%2fcli%2fcallback%2fzai&state=synthetic-vendor-state&response_type=code&scope=one+two&scope=three%20four"
+}
+
+func TestNativeLoginPreservesVendorAuthorizationURL(t *testing.T) {
+	t.Cleanup(func() { _ = configure(nil) })
+	if err := configure([]byte("app_version: 1.2.3\npublic_base_url: https://panel.example.test/cpa\n")); err != nil {
+		t.Fatal(err)
+	}
+	for _, site := range []string{"zai", "bigmodel"} {
+		t.Run(site, func(t *testing.T) {
+			authorize := vendorAuthorizeURLForTest(site)
+			sender := &fakeSender{reply: func(req pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+				if req.Method != "POST" || req.URL != zcodeRoot+"/api/v1/oauth/cli/init" {
+					t.Fatal("login start did not use CLI init")
+				}
+				var init map[string]string
+				if err := json.Unmarshal(req.Body, &init); err != nil || init["provider"] != site {
+					t.Fatal("wrong CLI provider")
+				}
+				return jsonReply(fmt.Sprintf(`{"flow_id":"0123456789abcdef0123456789abcdef","authorize_url":%q,"poll_interval_sec":2,"expires_at":%d}`, authorize, time.Now().Add(time.Minute).Unix())), nil
+			}}
+			start, err := startLogin(pluginapi.AuthLoginStartRequest{
+				Provider: entryForSite(site),
+				BaseURL:  "http://localhost:8317/v8/management/oauth/callback",
+				Host:     pluginapi.HostConfigSummary{AuthDir: t.TempDir()},
+			}, sender)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if start.URL != authorize {
+				t.Fatal("CLI authorization URL was rewritten; vendor callback, state and raw query must be preserved")
+			}
+			if len(sender.requests) != 1 || start.State == "" || strings.Contains(start.URL, start.State) {
+				t.Fatal("login start changed transport or exposed CPA polling state")
+			}
+		})
+	}
+}
+
+func TestNativeLoginRejectsInvalidAuthorizationURL(t *testing.T) {
+	t.Cleanup(func() { _ = configure(nil) })
+	if err := configure(nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, authorize := range []string{"", "/login", "http://vendor.example.test/login", "https:///login", "zcode://oauth/callback", "https://vendor.example.test/%zz"} {
+		t.Run(authorize, func(t *testing.T) {
+			sender := &fakeSender{reply: func(pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+				return jsonReply(fmt.Sprintf(`{"flow_id":"0123456789abcdef0123456789abcdef","authorize_url":%q,"expires_at":%d}`, authorize, time.Now().Add(time.Minute).Unix())), nil
+			}}
+			start, err := startLogin(pluginapi.AuthLoginStartRequest{Host: pluginapi.HostConfigSummary{AuthDir: t.TempDir()}}, sender)
+			if err == nil || err.Error() != "ZCode returned an invalid authorization URL" || start.URL != "" || start.State != "" {
+				t.Fatal("invalid authorization URL did not fail closed")
+			}
+		})
+	}
+}
+
 func TestNativeSitesStartPendingAndCompleteWithCompatibleCredentials(t *testing.T) {
 	t.Cleanup(func() { _ = configure(nil) })
 	if err := configure(nil); err != nil {
@@ -189,6 +252,7 @@ func TestNativeSitesStartPendingAndCompleteWithCompatibleCredentials(t *testing.
 		t.Run(site, func(t *testing.T) {
 			dir := t.TempDir()
 			polls := 0
+			callbackVisited := false
 			var bearer, device string
 			sender := &fakeSender{reply: func(req pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
 				u, err := url.Parse(req.URL)
@@ -198,16 +262,26 @@ func TestNativeSitesStartPendingAndCompleteWithCompatibleCredentials(t *testing.
 				switch {
 				case strings.HasSuffix(u.Path, "/oauth/cli/init"):
 					bearer, device = req.Headers.Get("Authorization"), req.Headers.Get("X-Device-Mid")
-					return jsonReply(fmt.Sprintf(`{"flow_id":"0123456789abcdef0123456789abcdef","authorize_url":"https://vendor.example.test/authorize","poll_interval_sec":2,"expires_at":%d}`, time.Now().Add(time.Minute).Unix())), nil
+					return jsonReply(fmt.Sprintf(`{"flow_id":"0123456789abcdef0123456789abcdef","authorize_url":%q,"poll_interval_sec":2,"expires_at":%d}`, vendorAuthorizeURLForTest(site), time.Now().Add(time.Minute).Unix())), nil
 				case strings.Contains(u.Path, "/oauth/cli/poll/"):
 					if req.Headers.Get("Authorization") != bearer || req.Headers.Get("X-Device-Mid") != device {
 						t.Fatal("poll identity changed")
 					}
 					polls++
-					if polls == 1 {
+					if !callbackVisited {
 						return jsonReply(`{"status":"pending"}`), nil
 					}
 					return jsonReply(`{"status":"ready","token":"synthetic.jwt.token","zai":{"access_token":"synthetic-site-token"},"bigmodel":{"accessToken":"synthetic-site-token"},"user":{"email":"synthetic@example.test","user_id":"123"}}`), nil
+				case u.Path == "/api/v1/oauth/cli/callback/"+site:
+					codeKey := "code"
+					if site == "bigmodel" {
+						codeKey = "authCode"
+					}
+					if req.Method != "GET" || u.Host != "zcode.z.ai" || u.Query().Get("state") != "synthetic-vendor-state" || u.Query().Get(codeKey) != "synthetic-code" || req.Headers.Get("Authorization") != "" {
+						t.Fatal("browser callback did not reach the CLI flow")
+					}
+					callbackVisited = true
+					return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte("<h1>Authorization successful</h1>")}, nil
 				case u.Path == "/api/auth/z/login":
 					return jsonReply(`{"access_token":"synthetic-business-token"}`), nil
 				case u.Path == "/api/biz/customer/getCustomerInfo":
@@ -232,6 +306,27 @@ func TestNativeSitesStartPendingAndCompleteWithCompatibleCredentials(t *testing.
 			if err != nil || pending.Status != pluginapi.AuthLoginStatusPending {
 				t.Fatalf("pending: %v %v", pending.Status, err)
 			}
+			// Simulate the vendor's browser redirect, without any desktop URI
+			// handler or manual callback submission to CPA.
+			authorize, err := url.Parse(start.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			redirectKey, codeKey := "redirect_uri", "code"
+			if site == "bigmodel" {
+				redirectKey, codeKey = "redirect", "authCode"
+			}
+			callback, err := url.Parse(authorize.Query().Get(redirectKey))
+			if err != nil {
+				t.Fatal(err)
+			}
+			query := callback.Query()
+			query.Set(codeKey, "synthetic-code")
+			query.Set("state", authorize.Query().Get("state"))
+			callback.RawQuery = query.Encode()
+			if _, err := sender.Do(pluginapi.HTTPRequest{Method: "GET", URL: callback.String()}); err != nil {
+				t.Fatal(err)
+			}
 			// Config changes must not alter an already sealed, non-chooser login.
 			if err := configure([]byte("site: auto\n")); err != nil {
 				t.Fatal(err)
@@ -239,6 +334,9 @@ func TestNativeSitesStartPendingAndCompleteWithCompatibleCredentials(t *testing.
 			complete, err := pollLogin(pluginapi.AuthLoginPollRequest{Host: host, State: start.State}, sender)
 			if err != nil || complete.Status != pluginapi.AuthLoginStatusSuccess {
 				t.Fatalf("complete: %v %v", complete.Status, err)
+			}
+			if !callbackVisited || polls != 2 {
+				t.Fatal("credential completion bypassed the CLI callback/poll flow")
 			}
 			cred, err := readCredential(complete.Auth.StorageJSON)
 			if err != nil || cred.Site != site || cred.Key != "synthetic-key-id.synthetic-secret" || cred.UID != "123" || complete.Auth.Provider != "zcode" || complete.Auth.Label != "synthetic@example.test" {

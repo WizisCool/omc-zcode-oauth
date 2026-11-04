@@ -10,7 +10,7 @@
 - A CPA build that accepts the plugin's declared ABI and RPC schema: the plugin
   registers ABI 1 and schema 10 from its pinned SDK, and an older host refuses it at
   registration with `plugin schema version 10 is not supported`.
-- **CPA v8.0.49 or later** to load 0.2.0 at all (schema 10 first shipped there), and
+- **CPA v8.0.49 or later** to load 0.2.x at all (schema 10 first shipped there), and
   **CPA v8.0.51 or later** for the separate Z.AI and BigModel sign-in cards: per-entry
   name and logo (`oauth_provider_entries`) first shipped in v8.0.51. On an older host
   both entries still work — a panel that predates the field shows one card per
@@ -51,7 +51,7 @@ Use CPA's plugin store to install `omc-zcode-oauth`, or call:
 POST /v0/management/plugin-store/omc-zcode-oauth/install
 ```
 
-Select release `0.2.0` with `?version=0.2.0`.
+Select release `0.2.1` with `?version=0.2.1`.
 The archive contains one library file and is installed under
 `<plugins-dir>/<os>/<arch>/` as `omc-zcode-oauth-v<version>.so`, `.dylib` or `.dll`,
 depending on the target platform: the installed version is part of the file name. CPA
@@ -104,8 +104,8 @@ go mod download
 GOPROXY=off GOSUMDB=off go test ./...
 GOPROXY=off GOSUMDB=off go vet ./...
 cd ..
-make build VERSION=0.2.0
-make package VERSION=0.2.0
+make build VERSION=0.2.1
+make package VERSION=0.2.1
 ```
 
 `make build` uses the current machine's OS and architecture. Official release
@@ -170,6 +170,16 @@ it does not expose the plugin's full error to the panel. Check the native plugin
 configuration first; CPA logs contain the detailed reason.
 `public_base_url` remains accepted and validated for existing configurations, but
 has no effect on native OAuth and does not restore the removed public chooser.
+
+The authorization URL from `/api/v1/oauth/cli/init` is preserved verbatim,
+including the vendor's state and callback parameter (`redirect_uri` for Z.ai,
+`redirect` for BigModel). The browser returns to ZCode's server-side
+`/api/v1/oauth/cli/callback/zai` or `/api/v1/oauth/cli/callback/bigmodel`, which
+completes the flow consumed by the plugin's CLI polling request. CPA's encrypted
+polling state is separate from the vendor's OAuth state; do not replace either
+state or substitute CPA's management callback URL. No VS Code or ZCode desktop
+app, localhost listener, or manual callback URL submission is needed, including
+when CPA runs on a remote server.
 
 Add `mode=team` to select a team seat. Complete the browser login, then poll:
 
@@ -260,7 +270,10 @@ contain the business token those endpoints require.
   check the account and gift bucket on the vendor site.
 - **Login stays pending:** complete the browser flow for the selected site.
   International and China accounts are separate; choose `Z.AI` or
-  `BigModel.cn` to match the account.
+  `BigModel.cn` to match the account. If an older plugin build opened a desktop
+  app prompt or left the browser at `/app/oauth/login`, update the plugin and
+  start a new sign-in. The old authorization URL still contains the desktop
+  redirect; a new flow is needed to use the server-side CLI callback.
 - **A model is absent:** the vendor catalogue may not expose it, or a gift-only
   credential may have no active bucket containing that model.
 - **A 3012 marker blocks calls:** check the account in ZCode. Only remove the
