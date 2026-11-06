@@ -27,9 +27,9 @@ func quotaFetch(req pluginapi.QuotaFetchRequest, sender httpSender) (pluginapi.Q
 		return pluginapi.QuotaFetchResponse{}, err
 	}
 	out := pluginapi.QuotaFetchResponse{}
-	// OMC renders a bucket as "<group display name> · <window>" and drops the
-	// bucket description, so the group is the product and each window names its
-	// own pool. Exact amounts stay in the description for hosts that show it.
+	// OMC renders a bucket as "<group display name> · <window>" and prints the
+	// bucket description beneath it, so the group carries the product, each
+	// window names its own pool, and the description carries the exact amounts.
 	group := pluginapi.QuotaGroup{DisplayName: "ZCode"}
 	if c.Plan != "" {
 		tier := "Coding Plan"
@@ -159,8 +159,8 @@ func quotaFetch(req pluginapi.QuotaFetchRequest, sender httpSender) (pluginapi.Q
 						continue
 					}
 					fraction := clamp(remaining.Value / x.Total.Value)
-					// The amounts lead so a host that renders the description shows
-					// them even though OMC currently drops it.
+					// The amounts lead: the description is the only place a host can
+					// read the counts, and OMC prints it under the bar.
 					desc := fmt.Sprintf("%s / %s tokens left", formatAmount(math.Max(0, remaining.Value)), formatAmount(x.Total.Value))
 					desc += "; Models: " + strings.Join(bucketModels(x), ", ")
 					if pending {

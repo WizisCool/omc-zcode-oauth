@@ -65,8 +65,8 @@ func TestQuotaGiftWindowsHideOpaquePlanNames(t *testing.T) {
 	}
 }
 
-// The exact amounts lead the gift description: OMC drops the description, but
-// hosts that render it still see the counts rather than only a bar.
+// The exact amounts lead the gift description because that line is the only
+// place a host can read the counts: a bar alone cannot say how much is left.
 func TestQuotaGiftDescriptionsLeadWithAmounts(t *testing.T) {
 	cases := []struct {
 		name string
