@@ -51,7 +51,7 @@ Use CPA's plugin store to install `omc-zcode-oauth`, or call:
 POST /v0/management/plugin-store/omc-zcode-oauth/install
 ```
 
-Select release `0.2.1` with `?version=0.2.1`.
+Select release `0.2.2` with `?version=0.2.2`.
 The archive contains one library file and is installed under
 `<plugins-dir>/<os>/<arch>/` as `omc-zcode-oauth-v<version>.so`, `.dylib` or `.dll`,
 depending on the target platform: the installed version is part of the file name. CPA
@@ -104,8 +104,8 @@ go mod download
 GOPROXY=off GOSUMDB=off go test ./...
 GOPROXY=off GOSUMDB=off go vet ./...
 cd ..
-make build VERSION=0.2.1
-make package VERSION=0.2.1
+make build VERSION=0.2.2
+make package VERSION=0.2.2
 ```
 
 `make build` uses the current machine's OS and architecture. Official release
