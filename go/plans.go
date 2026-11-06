@@ -190,10 +190,9 @@ func (b balanceData) activePlanName() string {
 	now := b.now()
 	for _, p := range b.Plans {
 		if livePlan(p, now) {
-			if p.Name != "" {
-				return p.Name
-			}
-			return "Gift"
+			// A vendor plan name can be an identifier; the subscription label
+			// should still read as one ("Gift" when there is nothing to show).
+			return displayPlanName(p.Name)
 		}
 	}
 	return ""
