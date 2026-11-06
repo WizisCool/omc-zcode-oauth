@@ -27,6 +27,10 @@ func quotaFetch(req pluginapi.QuotaFetchRequest, sender httpSender) (pluginapi.Q
 		return pluginapi.QuotaFetchResponse{}, err
 	}
 	out := pluginapi.QuotaFetchResponse{}
+	// OMC renders a bucket as "<group display name> · <window>" and drops the
+	// bucket description, so the group is the product and each window names its
+	// own pool. Exact amounts stay in the description for hosts that show it.
+	group := pluginapi.QuotaGroup{DisplayName: "ZCode"}
 	if c.Plan != "" {
 		tier := "Coding Plan"
 		if c.Key == "" {
@@ -57,7 +61,6 @@ func quotaFetch(req pluginapi.QuotaFetchRequest, sender httpSender) (pluginapi.Q
 				} `json:"limits"`
 			}
 			if json.Unmarshal(raw, &data) == nil {
-				group := pluginapi.QuotaGroup{DisplayName: "GLM Coding Plan"}
 				for _, limit := range data.Limits {
 					if !limit.Percentage.Known {
 						continue
@@ -69,9 +72,13 @@ func quotaFetch(req pluginapi.QuotaFetchRequest, sender httpSender) (pluginapi.Q
 						name = "MCP"
 						desc = "MCP usage; not a model limit"
 					case limit.Type == "TOKENS_LIMIT" && limit.Unit == 3 && (limit.Number == 5 || limit.Number == 0):
+						// The vendor reports a percentage only, so the description
+						// names the window instead of inventing token totals.
 						name = "5h"
+						desc = "Coding Plan 5-hour window"
 					case limit.Type == "TOKENS_LIMIT" && ((limit.Unit == 6 && (limit.Number == 1 || limit.Number == 0)) || (limit.Unit == 4 && limit.Number == 7)):
 						name = "Weekly"
+						desc = "Coding Plan weekly window"
 					default:
 						continue
 					}
@@ -80,9 +87,6 @@ func quotaFetch(req pluginapi.QuotaFetchRequest, sender httpSender) (pluginapi.Q
 						reset = time.UnixMilli(int64(limit.NextReset.Value)).UTC().Format(time.RFC3339)
 					}
 					group.Buckets = append(group.Buckets, pluginapi.QuotaBucket{Window: name, RemainingFraction: clamp(1 - limit.Percentage.Value/100), ResetTime: reset, Description: desc})
-				}
-				if len(group.Buckets) > 0 {
-					out.Groups = append(out.Groups, group)
 				}
 			}
 		}
@@ -125,7 +129,6 @@ func quotaFetch(req pluginapi.QuotaFetchRequest, sender httpSender) (pluginapi.Q
 			if balance.ServerTime.Known {
 				out.ServerTimeOffsetMs = int64(balance.ServerTime.Value*1000) - time.Now().UnixMilli()
 			}
-			group := pluginapi.QuotaGroup{DisplayName: "Gift plans"}
 			total := float64(0)
 			allKnown := true
 			for _, x := range balance.Balances {
@@ -156,18 +159,18 @@ func quotaFetch(req pluginapi.QuotaFetchRequest, sender httpSender) (pluginapi.Q
 						continue
 					}
 					fraction := clamp(remaining.Value / x.Total.Value)
-					desc := "Models: " + strings.Join(bucketModels(x), ", ")
+					// The amounts lead so a host that renders the description shows
+					// them even though OMC currently drops it.
+					desc := fmt.Sprintf("%s / %s tokens left", formatAmount(math.Max(0, remaining.Value)), formatAmount(x.Total.Value))
+					desc += "; Models: " + strings.Join(bucketModels(x), ", ")
 					if pending {
 						fraction = 0
 						desc += "; 未开始"
 					}
 					for _, model := range bucketModels(x) {
-						group.Buckets = append(group.Buckets, pluginapi.QuotaBucket{Window: p.Name + " · " + model, RemainingFraction: fraction, ResetTime: secondsTime(x.Expires), Description: desc})
+						group.Buckets = append(group.Buckets, pluginapi.QuotaBucket{Window: displayPlanName(p.Name) + " · " + model, RemainingFraction: fraction, ResetTime: secondsTime(x.Expires), Description: desc})
 					}
 				}
-			}
-			if len(group.Buckets) > 0 {
-				out.Groups = append(out.Groups, group)
 			}
 			if allKnown {
 				out.Summary = append(out.Summary, metric("gift_tokens_remaining", "Gift tokens remaining", "tokens", total))
@@ -194,10 +197,100 @@ func quotaFetch(req pluginapi.QuotaFetchRequest, sender httpSender) (pluginapi.Q
 			}
 		}
 	}
+	if len(group.Buckets) > 0 {
+		out.Groups = append(out.Groups, group)
+	}
 	if out.Subscription == nil {
 		out.Subscription = &pluginapi.QuotaSubscription{Plan: "ZCode", TierName: "Gift"}
 	}
 	return out, nil
+}
+
+// opaquePlanName reports a vendor plan name that carries an identifier rather
+// than display text: activation codes ("act-20261105-316"), UUIDs, hex ids and
+// bare numbers. Those must never become a quota window or subscription label.
+func opaquePlanName(name string) bool {
+	n := strings.TrimSpace(name)
+	if n == "" {
+		return false
+	}
+	if strings.Count(n, "-") == 4 && len(n) == 36 {
+		return true
+	}
+	digits, letters := 0, 0
+	for _, r := range n {
+		switch {
+		case r >= '0' && r <= '9':
+			digits++
+		case r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z':
+			letters++
+		}
+	}
+	if digits == 0 {
+		return false
+	}
+	// "act-20261105-316", "plan_123456", "sub-0001": a short word then a run
+	// of digits, with no spaces.
+	if !strings.ContainsAny(n, " \t") && letters <= 8 {
+		parts := strings.FieldsFunc(n, func(r rune) bool { return r == '-' || r == '_' })
+		if len(parts) >= 2 && digits >= 6 {
+			for _, part := range parts[1:] {
+				if part == "" {
+					return false
+				}
+				for _, r := range part {
+					if r < '0' || r > '9' {
+						return false
+					}
+				}
+			}
+			return true
+		}
+	}
+	if digits == len([]rune(n)) && digits >= 6 {
+		return true
+	}
+	hexOnly := true
+	for _, r := range strings.ToLower(n) {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			hexOnly = false
+			break
+		}
+	}
+	return hexOnly && len(n) >= 16
+}
+
+// displayPlanName is the plan half of a quota label: the vendor's own name when
+// it reads as display text, otherwise the role the pool plays.
+func displayPlanName(name string) string {
+	if n := strings.TrimSpace(name); n != "" && !opaquePlanName(n) {
+		return n
+	}
+	return "Gift"
+}
+
+// formatAmount writes a unit count with thousands separators and one decimal
+// for a part unit, matching how the vendor panels show gift amounts.
+func formatAmount(v float64) string {
+	var text string
+	if v == math.Trunc(v) {
+		text = fmt.Sprintf("%.0f", v)
+	} else {
+		text = fmt.Sprintf("%.1f", v)
+	}
+	whole, fraction, hasFraction := strings.Cut(text, ".")
+	var b strings.Builder
+	for i := 0; i < len(whole); i++ {
+		if i > 0 && (len(whole)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte(whole[i])
+	}
+	if hasFraction {
+		b.WriteByte('.')
+		b.WriteString(fraction)
+	}
+	return b.String()
 }
 func quotaDescription() pluginapi.QuotaDescribeResponse {
 	return pluginapi.QuotaDescribeResponse{SupportedProviders: []string{"zcode"}, DisplayName: "ZCode", SupportsReset: false}

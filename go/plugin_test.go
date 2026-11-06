@@ -827,15 +827,19 @@ func TestQuotaNormalizedFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if q.Subscription == nil || q.Subscription.Plan != "Coding Pro" || q.Subscription.TierName != "Coding Plan" || len(q.Groups) != 2 {
+	if q.Subscription == nil || q.Subscription.Plan != "Coding Pro" || q.Subscription.TierName != "Coding Plan" || len(q.Groups) != 1 || q.Groups[0].DisplayName != "ZCode" {
 		t.Fatalf("unexpected quota shape")
 	}
-	paid := q.Groups[0].Buckets
-	if len(paid) != 3 || paid[0].Window != "5h" || paid[0].RemainingFraction != 0.8 || paid[1].Window != "Weekly" || paid[1].RemainingFraction != 0.4 || !strings.Contains(paid[2].Description, "not a model limit") {
+	buckets := q.Groups[0].Buckets
+	if len(buckets) != 5 {
+		t.Fatalf("bucket count %d", len(buckets))
+	}
+	paid := buckets[:3]
+	if paid[0].Window != "5h" || paid[0].RemainingFraction != 0.8 || paid[0].Description != "Coding Plan 5-hour window" || paid[1].Window != "Weekly" || paid[1].RemainingFraction != 0.4 || paid[1].Description != "Coding Plan weekly window" || !strings.Contains(paid[2].Description, "not a model limit") {
 		t.Fatal("wrong paid quota")
 	}
-	gift := q.Groups[1].Buckets
-	if len(gift) != 2 || gift[0].RemainingFraction != 0.75 || gift[1].RemainingFraction != 0 || !strings.Contains(gift[1].Description, "未开始") {
+	gift := buckets[3:]
+	if len(gift) != 2 || gift[0].RemainingFraction != 0.75 || !strings.HasPrefix(gift[0].Description, "75 / 100 tokens left") || gift[1].RemainingFraction != 0 || !strings.Contains(gift[1].Description, "未开始") {
 		t.Fatal("wrong gift quota")
 	}
 	metrics := map[string]float64{}
