@@ -15,7 +15,7 @@ const resourcePrefix = "/v0/resource/plugins/" + pluginStoreID
 // plugin's logo as a document (the store manifests are URLs too) and only the
 // CPA-native resource routes are guaranteed to be served to an unauthenticated
 // management client.
-const publicLogoBaseURL = "https://raw.githubusercontent.com/WizisCool/omc-zcode-oauth/refs/heads/main/assets/"
+const publicLogoBaseURL = "https://raw.githubusercontent.com/omc-community/omc-zcode-oauth/refs/heads/main/assets/"
 
 // resourceAssetURL is the public address of one embedded logo. Only the two
 // names registered below are addressable, so the set of URLs the plugin can

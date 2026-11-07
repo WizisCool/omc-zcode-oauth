@@ -1,4 +1,4 @@
-module github.com/WizisCool/omc-zcode-oauth
+module github.com/omc-community/omc-zcode-oauth
 
 go 1.27.1
 

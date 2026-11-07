@@ -19,8 +19,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/WizisCool/omc-zcode-oauth/releases"><img src="https://img.shields.io/github/v/release/WizisCool/omc-zcode-oauth?label=release" alt="Release"></a>
-  <a href="https://github.com/WizisCool/omc-zcode-oauth/actions/workflows/build.yml"><img src="https://github.com/WizisCool/omc-zcode-oauth/actions/workflows/build.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/omc-community/omc-zcode-oauth/releases"><img src="https://img.shields.io/github/v/release/omc-community/omc-zcode-oauth?label=release" alt="Release"></a>
+  <a href="https://github.com/omc-community/omc-zcode-oauth/actions/workflows/build.yml"><img src="https://github.com/omc-community/omc-zcode-oauth/actions/workflows/build.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/CLIProxyAPI-v8+-4f46e5" alt="CLIProxyAPI v8+">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license">
 </p>
@@ -102,7 +102,7 @@ plugins:
   enabled: true
   dir: /path/to/plugins
   store-sources:
-    - https://raw.githubusercontent.com/WizisCool/omc-zcode-oauth/refs/heads/main/registry.json
+    - https://raw.githubusercontent.com/omc-community/omc-zcode-oauth/refs/heads/main/registry.json
   configs:
     omc-zcode-oauth:
       enabled: true

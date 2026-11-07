@@ -46,7 +46,7 @@ func unmarshal(raw []byte, out any) error {
 	return nil
 }
 func registration() any {
-	return map[string]any{"schema_version": pluginabi.SchemaVersion, "metadata": pluginapi.Metadata{Name: "OMC ZCode OAuth", Version: pluginVersion, Author: "JUNZE", GitHubRepository: "https://github.com/WizisCool/omc-zcode-oauth", Logo: "https://raw.githubusercontent.com/WizisCool/omc-zcode-oauth/refs/heads/main/assets/logo.png", ConfigFields: []pluginapi.ConfigField{
+	return map[string]any{"schema_version": pluginabi.SchemaVersion, "metadata": pluginapi.Metadata{Name: "OMC ZCode OAuth", Version: pluginVersion, Author: "JUNZE", GitHubRepository: "https://github.com/omc-community/omc-zcode-oauth", Logo: "https://raw.githubusercontent.com/omc-community/omc-zcode-oauth/refs/heads/main/assets/logo.png", ConfigFields: []pluginapi.ConfigField{
 		{Name: "site", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"zai", "bigmodel"}, Description: "Fallback sign-in site for a login request that names no entry: zai (the default) or bigmodel. The panel's Z.AI / BigModel sign-in entries pick their own site and do not read this."},
 		{Name: "mode", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"own", "team"}, Description: "Default OAuth plan selection (default own)."},
 		{Name: "max_concurrency", Type: pluginapi.ConfigFieldTypeInteger, Description: "Maximum simultaneous requests per credential (default 3)."},
