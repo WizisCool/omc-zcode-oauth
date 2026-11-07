@@ -12,7 +12,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
-func TestOMCDescriptorMatchesBuildAndRegistry(t *testing.T) {
+func TestOMCDescriptorMatchesBuildMetadata(t *testing.T) {
 	source, err := os.ReadFile("assets/omc.json")
 	if err != nil {
 		t.Fatal(err)
@@ -44,22 +44,6 @@ func TestOMCDescriptorMatchesBuildAndRegistry(t *testing.T) {
 		if strings.TrimSpace(descriptor.I18N.Description[locale]) == "" {
 			t.Errorf("missing OMC description for %s", locale)
 		}
-	}
-	registryJSON, err := os.ReadFile("../registry.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var registry struct {
-		Plugins []struct {
-			ID      string `json:"id"`
-			Version string `json:"version"`
-		} `json:"plugins"`
-	}
-	if err := json.Unmarshal(registryJSON, &registry); err != nil {
-		t.Fatal(err)
-	}
-	if len(registry.Plugins) != 1 || registry.Plugins[0].ID != descriptor.PluginID || registry.Plugins[0].Version != descriptor.PluginVersion {
-		t.Fatal("registry and descriptor release identities differ")
 	}
 	metadata := registration().(map[string]any)["metadata"].(pluginapi.Metadata)
 	if metadata.Version != descriptor.PluginVersion || metadata.Name != "OMC ZCode OAuth" || len(metadata.ConfigFields) != 6 {

@@ -67,7 +67,7 @@ Commits must be atomic, focused, and independently verified.
   - `executor`: Request execution, stream pumps, SSE framing, and retries.
   - `quota`: Balance queries, plan quota normalization, and rate limits.
   - `config`: Plugin configuration fields, parsing, and validation.
-  - `registry`: Plugin store metadata (`registry.json`) and packaging.
+  - `registry`: Plugin store metadata and packaging.
   - `readme`: Project overview, documentation links, and branding.
   - `tooling`: Makefiles, CI workflows, and build scripts.
   - `release`: Release tags and version bumps.

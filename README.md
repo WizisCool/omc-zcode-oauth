@@ -95,14 +95,14 @@ local callback listener, or manual callback URL submission is required.
 
 ## Installation
 
-Add this repository as a plugin-store source:
+Add the official OMC plugin source:
 
 ```yaml
 plugins:
   enabled: true
   dir: /path/to/plugins
   store-sources:
-    - https://raw.githubusercontent.com/omc-community/omc-zcode-oauth/refs/heads/main/registry.json
+    - https://raw.githubusercontent.com/omc-community/omc-plugins/main/official.json
   configs:
     omc-zcode-oauth:
       enabled: true
@@ -169,7 +169,6 @@ assets/logo.png      Z.AI and plugin-store logo
 assets/bigmodel.png  BigModel.cn sign-in logo
 go/                  Go/cgo plugin implementation and tests
 docs/USAGE.md        Operator installation and usage guide
-registry.json        CLIProxyAPI plugin-store metadata
 ```
 
 The Go implementation is independent. ZCode prompt compatibility data is taken

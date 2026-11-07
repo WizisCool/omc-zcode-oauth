@@ -85,14 +85,14 @@ OAuth 发起和轮询使用 CPA 原生受认证管理 API，公共插件资源�
 
 ## 安装
 
-将本仓库添加为插件商店源：
+使用 OMC 官方插件源：
 
 ```yaml
 plugins:
   enabled: true
   dir: /path/to/plugins
   store-sources:
-    - https://raw.githubusercontent.com/omc-community/omc-zcode-oauth/refs/heads/main/registry.json
+    - https://raw.githubusercontent.com/omc-community/omc-plugins/main/official.json
   configs:
     omc-zcode-oauth:
       enabled: true
@@ -154,7 +154,6 @@ assets/logo.png      Z.AI 与插件商店 logo
 assets/bigmodel.png  BigModel.cn 登录 logo
 go/                  Go/cgo 插件实现与测试
 docs/USAGE.md        部署安装与使用指南
-registry.json        CLIProxyAPI 插件商店元数据
 ```
 
 Go 实现独立于面板。ZCode 提示词兼容性数据取自官方 ZCode `v3.14.3` 源码；

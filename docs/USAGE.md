@@ -30,7 +30,7 @@ plugins:
   enabled: true
   dir: /path/to/plugins
   store-sources:
-    - https://raw.githubusercontent.com/omc-community/omc-zcode-oauth/refs/heads/main/registry.json
+    - https://raw.githubusercontent.com/omc-community/omc-plugins/main/official.json
   configs:
     omc-zcode-oauth:
       enabled: true
@@ -75,7 +75,7 @@ Manual layout, for the version you install:
 
 Releases from 0.1.4 publish an optional `<plugin_id>.omc.json` (`schema_version` 1)
 with localized descriptions. A release that does not carry the file — including 0.1.3
-— leaves readers on the description from `registry.json`.
+— leaves readers on the description published by the plugin store.
 
 When a release carries the file, the plugin serves the same bytes at
 `/v0/resource/plugins/omc-zcode-oauth/omc.json`. The parts that matter here:
@@ -93,8 +93,8 @@ When a release carries the file, the plugin serves the same bytes at
 
 The served body is never re-serialized: the plugin embeds the same file that packaging
 copies into the release, so served and published bytes are comparable by hash. Bump the
-file together with `registry.json`. The archive itself keeps its layout of one library
-file at the root.
+file as part of the release. The archive itself keeps its layout of one library file at
+the root.
 
 ## Build locally
 
